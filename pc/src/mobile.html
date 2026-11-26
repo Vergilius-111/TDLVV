@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#fff8d8" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>TDLVV · 手机端</title>
+  <style>
+    :root {
+      --paper: #fffdf2;
+      --paper-2: #fff8d8;
+      --ink: #3d3620;
+      --ink-2: #7a6f45;
+      --muted: #a89a66;
+      --accent: #b8912a;
+      --accent-ink: #fffbe6;
+      --edge: rgba(120, 100, 30, 0.18);
+      --danger: #a4452b;
+      --ok: #4d7b23;
+      --card: rgba(255, 253, 244, 0.92);
+      --radius: 16px;
+      --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+      overscroll-behavior-x: none;
+    }
+    input, textarea, select { font-size: 16px; }
+    body {
+      font-family: var(--font);
+      color: var(--ink);
+      background:
+        radial-gradient(110% 55% at 8% 0%, #fff3bd 0%, transparent 60%),
+        linear-gradient(180deg, #fffdf2 0%, #fff8d8 100%);
+      min-height: 100dvh;
+    }
+    .shell { width: 100%; max-width: 520px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; overflow-x: hidden; }
+    .login {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 28px 24px calc(28px + env(safe-area-inset-bottom));
+    }
+    .brandMark {
+      width: 54px; height: 54px; border-radius: 17px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid var(--edge);
+      font-size: 28px; margin-bottom: 18px;
+    }
+    .login h1 { font-size: 25px; margin: 0 0 8px; letter-spacing: 0.4px; }
+    .login p { margin: 0 0 20px; color: var(--ink-2); font-size: 14px; line-height: 1.7; }
+    .codeInput {
+      width: 100%; height: 54px; border-radius: 12px;
+      border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.68);
+      padding: 0 16px; font-size: 20px; letter-spacing: 5px;
+      text-transform: uppercase; color: var(--ink); outline: none;
+      text-align: center; margin-bottom: 10px;
+    }
+    .codeInput:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(184, 145, 42, 0.14); }
+    .loginBtn {
+      width: 100%; height: 50px; border: 0; border-radius: 12px;
+      background: var(--accent); color: var(--accent-ink);
+      font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    .loginBtn:disabled { opacity: 0.55; }
+    .loginMsg { min-height: 22px; margin-top: 12px; color: var(--danger); font-size: 13px; line-height: 1.6; }
+    .loginFoot { margin-top: 22px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .appView { flex: 1; display: flex; flex-direction: column; min-height: 100dvh; }
+    header {
+      position: sticky; top: 0; z-index: 2;
+      padding: calc(12px + env(safe-area-inset-top)) 16px 10px;
+      background: rgba(255, 252, 235, 0.9);
+      border-bottom: 1px solid var(--edge);
+      backdrop-filter: blur(10px);
+    }
+    .headLine { display: flex; align-items: center; gap: 10px; }
+    .meAvatar {
+      width: 38px; height: 38px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.55); border: 1px solid var(--edge);
+      font-size: 21px; flex: 0 0 auto;
+    }
+    .headText { min-width: 0; flex: 1; }
+    .headText b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .headText small { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .refreshBtn {
+      width: 38px; height: 38px; border-radius: 11px; border: 1px solid var(--edge);
+      background: rgba(255, 255, 255, 0.45); color: var(--ink-2);
+      font-size: 18px; cursor: pointer;
+    }
+    .summary { margin-top: 9px; font-size: 12px; color: var(--muted); }
+    .taskList { flex: 1; padding: 12px 12px 18px; }
+    .task {
+      background: var(--card); border: 1px solid var(--edge);
+      border-radius: 13px; padding: 12px 13px;
+      margin-bottom: 8px; box-shadow: 0 3px 12px rgba(80, 64, 12, 0.06);
+    }
+    .task.pinned { border-color: rgba(184, 145, 42, 0.45); }
+    .taskText { font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .taskMeta { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 5px 10px; font-size: 12px; color: var(--ink-2); }
+    .taskMeta span { white-space: nowrap; }
+    .taskMeta .due { color: var(--accent); font-weight: 600; }
+    .taskMeta .overdue { color: var(--danger); }
+    .fields { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--edge); display: flex; flex-direction: column; gap: 4px; }
+    .fieldLine { font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+    .fieldLine b { color: var(--accent); font-weight: 600; }
+    .empty {
+      margin: 52px 18px; text-align: center; color: var(--muted);
+      font-size: 14px; line-height: 1.8;
+    }
+    .empty .mark { display: block; font-size: 32px; margin-bottom: 12px; }
+    .composer {
+      position: sticky; bottom: 0; z-index: 3;
+      width: 100%;
+      padding: 9px 12px calc(10px + env(safe-area-inset-bottom));
+      background: rgba(255, 252, 235, 0.94);
+      border-top: 1px solid var(--edge);
+      backdrop-filter: blur(10px);
+    }
+    .composerLabel { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 11px; color: var(--ink-2); }
+    .composerLabel b { color: var(--accent); }
+    .composerRow { display: flex; gap: 7px; align-items: flex-end; }
+    #newTask {
+      flex: 1; min-height: 46px; max-height: 30dvh;
+      border: 1px solid var(--edge); border-radius: 11px;
+      background: rgba(255, 255, 255, 0.65);
+      padding: 11px 12px; font-size: 16px; line-height: 1.45;
+      color: var(--ink); resize: none; outline: none;
+    }
+    #newTask:focus { border-color: var(--accent); }
+    .sendBtn {
+      flex: 0 0 auto; height: 46px; padding: 0 16px;
+      border: 0; border-radius: 11px; background: var(--accent);
+      color: var(--accent-ink); font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .sendBtn:disabled { opacity: 0.45; }
+    .publishHint { display: none; padding: 12px 12px calc(14px + env(safe-area-inset-bottom)); font-size: 12px; color: var(--muted); text-align: center; border-top: 1px solid var(--edge); }
+    .toast {
+      position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom));
+      transform: translateX(-50%) translateY(8px);
+      max-width: 84vw; padding: 9px 13px; border-radius: 9px;
+      background: rgba(61, 54, 32, 0.92); color: #fff;
+      font-size: 13px; line-height: 1.5; opacity: 0; pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease; z-index: 9;
+      text-align: center;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    [hidden] { display: none !important; }
+    @media (min-width: 700px) {
+      body { padding: 18px 0; }
+      .shell { min-height: calc(100dvh - 36px); border: 1px solid var(--edge); border-radius: 22px; overflow: hidden; box-shadow: 0 18px 50px rgba(80, 64, 12, 0.14); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="login" id="loginView">
+      <div class="brandMark">🐱</div>
+      <h1>TDLVV 手机端</h1>
+      <p>只查看当前任务和发布任务。文件和任务文件编辑不在这里，避免在手机上误改。</p>
+      <input class="codeInput" id="codeInput" maxlength="6" inputmode="text" autocomplete="one-time-code" placeholder="设备码" aria-label="设备登录码" />
+      <button class="loginBtn" id="loginBtn">进入团队</button>
+      <div class="loginMsg" id="loginMsg"></div>
+      <div class="loginFoot">在电脑的「团队管理」里点「生成手机链接」，把链接发到手机打开即可自动进入；设备码由创建者维护，长期有效，重置后旧码立即失效。</div>
+    </section>
+
+    <section class="appView" id="appView" hidden>
+      <header>
+        <div class="headLine">
+          <div class="meAvatar" id="meAvatar">🐱</div>
+          <div class="headText"><b id="meName">—</b><small id="teamName">—</small></div>
+          <button class="refreshBtn" id="refreshBtn" title="刷新" aria-label="刷新">↻</button>
+        </div>
+        <div class="summary" id="summary"></div>
+      </header>
+      <main class="taskList" id="taskList"></main>
+      <footer class="composer" id="composer">
+        <div class="composerLabel"><span>发布到：<b>全员</b></span><span id="postState"></span></div>
+        <div class="composerRow">
+          <textarea id="newTask" rows="1" maxlength="500" placeholder="写一条任务，发布到团队…"></textarea>
+          <button class="sendBtn" id="sendBtn">发布</button>
+        </div>
+      </footer>
+      <div class="publishHint" id="publishHint">当前身份是普通成员，只能查看任务；发布任务需要创建者或管理员。</div>
+    </section>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const tokenKey = 'tdlvv-mobile-token:' + location.host;
+    let token = '';
+    let rev = 0;
+    let canPublish = false;
+    let polling = null;
+    let busy = false;
+    let toastTimer = null;
+
+    function toast(text) {
+      const node = $('toast');
+      node.textContent = text;
+      node.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => node.classList.remove('show'), 2200);
+    }
+
+    function fmtDue(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      const now = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      const hm = p(d.getHours()) + ':' + p(d.getMinutes());
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+        return '今天 ' + hm;
+      }
+      const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      if (d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate()) {
+        return '明天 ' + hm;
+      }
+      return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+    }
+
+    async function api(path, opts) {
+      const o = opts || {};
+      const headers = Object.assign({}, o.headers || {});
+      if (token) headers['x-token'] = token;
+      if (o.body !== undefined) headers['content-type'] = 'application/json';
+      const r = await fetch(path, {
+        method: o.method || 'GET',
+        headers,
+        body: o.body === undefined ? undefined : JSON.stringify(o.body),
+        cache: 'no-store'
+      });
+      let data = null;
+      try { data = await r.json(); } catch (e) { /* ignore */ }
+      if (r.status === 401) throw Object.assign(new Error((data && data.error) || '登录已失效'), { auth: true });
+      if (!r.ok) throw new Error((data && data.error) || ('请求失败 ' + r.status));
+      return data || {};
+    }
+
+    function showLogin(msg) {
+      token = '';
+      localStorage.removeItem(tokenKey);
+      clearInterval(polling);
+      polling = null;
+      $('appView').hidden = true;
+      $('loginView').hidden = false;
+      $('loginMsg').textContent = msg || '';
+      setTimeout(() => { try { $('codeInput').focus(); } catch (e) { /* ignore */ } }, 120);
+    }
+
+    async function login(rawCode) {
+      const code = String(rawCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+      if (!code) { $('loginMsg').textContent = '请输入设备码'; return; }
+      $('loginBtn').disabled = true;
+      $('loginMsg').textContent = '正在进入…';
+      try {
+        const r = await api('/api/device/login', { method: 'POST', body: { code } });
+        if (!r.ok || !r.token) throw new Error(r.error || '设备码无效');
+        token = r.token;
+        localStorage.setItem(tokenKey, token);
+        $('loginMsg').textContent = '';
+        history.replaceState({}, '', '/m');
+        await loadState(true);
+        startPolling();
+      } catch (e) {
+        showLogin(e.message || '设备码无效');
+      } finally {
+        $('loginBtn').disabled = false;
+      }
+    }
+
+    function renderTasks(data) {
+      const list = $('taskList');
+      list.innerHTML = '';
+      const open = (data.tasks || []).filter((t) => !t.done && !t.closed);
+      const done = (data.tasks || []).filter((t) => t.done || t.closed);
+      $('summary').textContent = '待办 ' + open.length + ' 条' + (done.length ? ' · 已完成/关闭 ' + done.length + ' 条' : '');
+      if (!open.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        const mark = document.createElement('span');
+        mark.className = 'mark';
+        mark.textContent = '✨';
+        empty.appendChild(mark);
+        empty.appendChild(document.createTextNode(done.length ? '当前没有未完成任务' : '团队里还没有任务'));
+        list.appendChild(empty);
+        return;
+      }
+      open.forEach((t) => {
+        const card = document.createElement('article');
+        card.className = 'task' + (t.pinned ? ' pinned' : '');
+        const text = document.createElement('div');
+        text.className = 'taskText';
+        if (t.pinned) text.textContent = '📌 ' + t.text;
+        else text.textContent = t.text;
+        card.appendChild(text);
+
+        const meta = document.createElement('div');
+        meta.className = 'taskMeta';
+        if (t.dueAt) {
+          const due = document.createElement('span');
+          due.className = 'due' + (t.dueAt <= Date.now() ? ' overdue' : '');
+          due.textContent = '🕒 ' + fmtDue(t.dueAt);
+          meta.appendChild(due);
+        }
+        if (t.assigneeName) {
+          const who = document.createElement('span');
+          who.textContent = '👉 ' + t.assigneeName;
+          meta.appendChild(who);
+        } else {
+          const who = document.createElement('span');
+          who.textContent = '👉 未指派';
+          meta.appendChild(who);
+        }
+        if (t.creatorName) {
+          const by = document.createElement('span');
+          by.textContent = '发布：' + t.creatorName;
+          meta.appendChild(by);
+        }
+        if (meta.childNodes.length) card.appendChild(meta);
+
+        if (t.fields && t.fields.length) {
+          const fields = document.createElement('div');
+          fields.className = 'fields';
+          t.fields.forEach((f) => {
+            const line = document.createElement('div');
+            line.className = 'fieldLine';
+            const b = document.createElement('b');
+            b.textContent = f.label + '：';
+            line.appendChild(b);
+            line.appendChild(document.createTextNode(f.value || ''));
+            fields.appendChild(line);
+          });
+          card.appendChild(fields);
+        }
+        list.appendChild(card);
+      });
+    }
+
+    async function loadState(force) {
+      const q = !force && rev ? '?since=' + encodeURIComponent(rev) : '';
+      const data = await api('/api/mobile/state' + q);
+      if (data.unchanged) return;
+      rev = Number(data.rev) || 0;
+      canPublish = !!data.canPublish;
+      $('loginView').hidden = true;
+      $('appView').hidden = false;
+      $('meAvatar').textContent = (data.me && data.me.avatar) || '👤';
+      $('meName').textContent = (data.me && data.me.name) || '成员';
+      $('teamName').textContent = (data.boardName || '团队') + ' · 手机端';
+      $('composer').hidden = !canPublish;
+      $('publishHint').hidden = canPublish;
+      renderTasks(data);
+    }
+
+    function startPolling() {
+      clearInterval(polling);
+      polling = setInterval(() => {
+        if (document.visibilityState === 'hidden') return;
+        loadState(false).catch((e) => {
+          if (e && e.auth) showLogin('这个设备的登录已失效，请重新生成设备链接');
+        });
+      }, 2500);
+    }
+
+    async function publish() {
+      const box = $('newTask');
+      const text = box.value.trim();
+      if (!text) { toast('先写点任务内容'); return; }
+      if (busy) return;
+      busy = true;
+      $('sendBtn').disabled = true;
+      $('postState').textContent = '发布中…';
+      try {
+        await api('/api/action', { method: 'POST', body: { type: 'addTask', text, audience: { type: 'all' } } });
+        box.value = '';
+        box.style.height = '';
+        await loadState(true);
+        toast('已发布到团队');
+      } catch (e) {
+        toast(e.message || '发布失败');
+      } finally {
+        busy = false;
+        $('sendBtn').disabled = false;
+        $('postState').textContent = '';
+      }
+    }
+
+    $('loginBtn').addEventListener('click', () => login($('codeInput').value));
+    $('codeInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); login($('codeInput').value); }
+    });
+    $('refreshBtn').addEventListener('click', () => {
+      loadState(true).then(() => toast('已刷新')).catch((e) => toast(e.message || '刷新失败'));
+    });
+    $('sendBtn').addEventListener('click', publish);
+    $('newTask').addEventListener('input', () => {
+      const box = $('newTask');
+      box.style.height = 'auto';
+      box.style.height = Math.min(box.scrollHeight, Math.round(window.innerHeight * 0.3)) + 'px';
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && token) loadState(false).catch(() => {});
+    });
+
+    (async function boot() {
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      if (code) {
+        history.replaceState({}, '', '/m');
+        await login(code);
+        return;
+      }
+      token = localStorage.getItem(tokenKey) || '';
+      if (!token) { showLogin(''); return; }
+      try {
+        await loadState(true);
+        startPolling();
+      } catch (e) {
+        showLogin(e && e.auth ? '这个设备的登录已失效，请重新生成设备链接' : (e.message || '连不上创建者电脑'));
+      }
+    })();
+  </script>
+</body>
+</html>
