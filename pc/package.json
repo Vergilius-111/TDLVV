@@ -1,0 +1,57 @@
+{
+  "name": "tasknotes",
+  "productName": "TDLVV",
+  "version": "0.6.3",
+  "description": "TDLVV 任务便签 - 多团队共享的桌面待办（截止/提醒/成员角色）",
+  "main": "src/main.js",
+  "author": "TDLVV",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --show-window",
+    "dist:win": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.tdlvv.desktop",
+    "productName": "TDLVV",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "TDLVV-Setup-v${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "TDLVV",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "name": "tdlvv",
+  "productName": "TDLVV",
+  "version": "0.6.3",
+  "description": "TDLVV 任务便签 macOS 版 - 多团队共享的桌面待办（截止/提醒/成员角色）",
+  "main": "src/main.js",
+  "author": "TDLVV",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/sync.test.js && node test/features.test.js && node test/files-copy.test.js && node test/filepaths.test.js && node test/persist.test.js && node test/transfer.test.js",
+    "test:discover": "node test/discover.test.js",
+    "test:transfer": "node test/transfer.test.js",
+    "dist:mac": "electron-builder --mac --universal",
+    "dist:mac:arm64": "electron-builder --mac --arm64",
+    "dist:mac:x64": "electron-builder --mac --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.tdlvv.desktop",
+    "productName": "TDLVV",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin/cloudflared-mac-arm64",
+        "to": "cloudflared-mac-arm64"
+      },
+      {
+        "from": "bin/cloudflared-mac-x64",
+        "to": "cloudflared-mac-x64"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon-mac-1024.png",
+      "darkModeSupport": true,
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "minimumSystemVersion": "10.15",
+      "artifactName": "TDLVV-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "iconSize": 96,
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

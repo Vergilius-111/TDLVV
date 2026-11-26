@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'" />
+<title>TDLVV</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app theme-light" id="app" data-theme="light">
+    <header class="bar">
+      <div class="brand" id="brandBtn" title="个人设置（团队管理请点右侧齿轮）">
+        <span class="logoMark" id="myAvatarMini">🐱</span>
+        <div class="brandText">
+          <b id="brandName">TDLVV</b>
+          <div class="brandSubLine">
+            <span id="subTitle">我的任务</span>
+            <button class="brandGear hidden" id="brandGear" title="打开群管理：成员、邀请码、角色" aria-label="打开群管理">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3.1"/>
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .5 2.8l.15.1a2 2 0 0 1 1 1.73v.5a2 2 0 0 1-1 1.73l-.15.08a2 2 0 0 0-.5 2.8l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.5-2.8l-.15-.08a2 2 0 0 1-1-1.73v-.5a2 2 0 0 1 1-1.73l.15-.08a2 2 0 0 0 .5-2.8l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="ctrls">
+        <button class="ico" id="btnAddTeam" title="创建 / 加入团队">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" opacity=".85"/>
+          </svg>
+          <span class="badge hidden" id="reqBadge">0</span>
+        </button>
+        <button class="ico pinBtn" id="btnPin" title="固定在桌面最上层">📌</button>
+        <button class="ico" id="btnMin" title="最小化">—</button>
+        <button class="ico close" id="btnClose" title="关闭">✕</button>
+      </div>
+    </header>
+
+    <div class="teamTabs" id="teamTabs"></div>
+
+    <section class="noticeBar hidden" id="noticeBar">
+      <div class="noticeHead">
+        <span class="noticeTitle">📣 <b id="noticeTeamName">团队通知</b></span>
+        <div class="noticeTools">
+          <button class="noticeAdd" id="btnInvite" title="邀请同事加入这个团队">🔗 邀请</button>
+          <button class="noticeAdd hidden" id="btnNotice">＋ 发通知</button>
+        </div>
+      </div>
+      <div class="noticeList" id="noticeList"></div>
+    </section>
+
+    <div class="banner hidden" id="banner"></div>
+
+    <main class="tasks" id="tasks"></main>
+
+    <button class="doneBar" id="doneBar">
+      <span class="checkIco">✓</span>
+      <span>已完成</span>
+      <span class="count" id="doneCount">0</span>
+      <span class="doneArrow">›</span>
+    </button>
+
+    <footer class="addBar" id="addBar">
+      <div class="composerTop">
+        <span class="targetLabel" id="targetChip" title="这条任务发布到哪里">发布到：个人</span>
+        <button class="chipBtn hidden" id="audienceChip" title="发布给谁：全员 / 按角色 / 部分成员">👥 全员</button>
+        <button class="chipBtn" id="dueBtn" title="设置截止时间与提醒">🕒 截止 / 提醒</button>
+        <button class="chipBtn hidden" id="templateBtn" title="调用或新建任务模板">＋ 模板</button>
+        <span class="chipBtn fileChip hidden" id="fileChip" title="本次发布附带的文件"></span>
+      </div>
+      <div class="linkEditor hidden" id="linkEditor">
+        <div class="linkEditorHead">
+          <span id="linkEditorTitle">网页链接</span>
+          <button class="linkEditorClose" id="linkEditorClose" title="关闭">✕</button>
+        </div>
+        <div class="linkEditorRow">
+          <input id="linkInput" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="https://example.com">
+          <button class="linkMini" id="linkClear" title="清除链接">清除</button>
+          <button class="linkMini save" id="linkSave" title="保存链接">保存</button>
+        </div>
+        <div class="linkEditorHint" id="linkEditorHint">发布后点任务上的地球图标打开</div>
+      </div>
+      <div class="composerRow">
+        <textarea id="newTask" rows="1" autocomplete="off"></textarea>
+      </div>
+      <div class="composerFooter">
+        <div class="composerTools">
+          <button class="addTaskBtn" id="btnAddTask" title="新增任务（Ctrl + Enter）" aria-label="新增任务">＋</button>
+          <button class="linkBtn" id="linkUrlBtn" title="添加网页链接" aria-label="添加网页链接"><span class="linkIco">🌐</span></button>
+          <button class="linkBtn" id="linkPathBtn" title="添加任务文件（可拖动或选择）" aria-label="添加任务文件"><span class="linkIco">💻</span></button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 起名字 + 头像 -->
+  <div class="overlay hidden" id="namePanel">
+    <div class="card">
+      <div class="cardsHead">
+        <div class="bigAvatar" id="nameAvatar">🐱</div>
+        <div>
+          <h1>先起个名字</h1>
+          <p class="sub">同事看到的就是这个头像和名字，之后也能改</p>
+        </div>
+      </div>
+      <div class="avatarGrid" id="avatarGrid"></div>
+      <label class="field">
+        <span>我的名字</span>
+        <input id="nameInput" maxlength="12" placeholder="比如：小李" />
+      </label>
+      <button class="primary" id="btnNameOk">进入</button>
+      <p class="tips">进入后点右上角 ＋ 创建团队或申请加入，也可以先只记自己的任务。</p>
+    </div>
+  </div>
+
+  <!-- 团队 / 设置 -->
+  <div class="overlay hidden" id="teamsPanel">
+    <div class="card settingsCard">
+      <button class="cardClose" id="teamsClose">✕</button>
+      <div class="cardScroll">
+      <h2>团队与设置</h2>
+
+      <h3>我的资料</h3>
+      <div class="avatarRow">
+        <div class="bigAvatar small" id="profileAvatar">🐱</div>
+        <div class="avatarPick" id="profileAvatarPick"></div>
+      </div>
+      <div class="nameRow">
+        <label class="field">
+          <span>名字</span>
+          <input id="myNameInput" maxlength="12" />
+        </label>
+        <button class="ghost" id="saveName">保存</button>
+      </div>
+
+      <h3>我的团队 <span id="teamCount" class="miniCount">0</span></h3>
+      <div class="teamList" id="teamList"></div>
+
+      <div class="or"><span>创建新团队</span></div>
+      <div class="joinRow">
+        <input id="boardNameInput" maxlength="20" placeholder="团队 / 清单名字" />
+        <button class="secondary" id="btnCreate">创建</button>
+      </div>
+      <div class="pathPick">
+        <label class="field tiny">
+          <span>文件存放位置（创建者电脑）</span>
+          <div class="pathPickRow">
+            <input id="teamFilesPath" readonly placeholder="默认目录" autocomplete="off" spellcheck="false" />
+            <button class="secondary" id="teamFilesPick">选择</button>
+          </div>
+        </label>
+        <p class="tips" id="teamFilesTip">默认放在 TDLVV 的 task-files 目录；也可以选 NAS、共享盘或已同步的云盘文件夹。</p>
+      </div>
+
+      <div class="or"><span>用邀请码申请加入</span></div>
+      <div class="joinRow">
+        <input id="codeInput" maxlength="10" class="code" placeholder="6 位邀请码" autocomplete="off" />
+        <button class="secondary" id="btnJoin">申请加入</button>
+      </div>
+      <label class="field tiny">
+        <span>找不到？填创建者给的地址（可留空）</span>
+        <input id="manualHost" placeholder="https://xxx.trycloudflare.com 或 192.168.1.20:51234" />
+      </label>
+      <div class="or"><span>第二台电脑 / 手机设备登录</span></div>
+      <div class="joinRow">
+        <input id="deviceLinkInput" class="deviceInput" placeholder="粘贴创建者发的设备登录链接" autocomplete="off" spellcheck="false" />
+        <button class="secondary" id="btnDeviceLogin">登录</button>
+      </div>
+      <p class="tips">第二台电脑用同一成员身份登录时，粘贴创建者生成的链接；手机直接打开同一个链接即可，只查看当前任务和发布任务。</p>
+      <div class="err" id="teamsErr"></div>
+
+      <div id="nearbyArea">
+        <h3>同一网络里的团队</h3>
+        <div class="nearbyList" id="nearbyList"></div>
+        <p class="tips">发现不等于加入：点「申请加入」还是会先向创建者发申请，同意后才进来。</p>
+      </div>
+
+      <div class="settingsDivider"></div>
+
+      <h3>外观</h3>
+      <div class="seg" id="themeSeg">
+        <button data-theme="dark">深色</button>
+        <button data-theme="light">浅色</button>
+        <button data-theme="system">跟随系统</button>
+      </div>
+
+      <h3>字号</h3>
+      <div class="seg" id="fontSeg">
+        <button data-font="s">小</button>
+        <button data-font="m">中</button>
+        <button data-font="l">大</button>
+      </div>
+
+      <h3>语言</h3>
+      <div class="seg" id="langSeg" data-no-i18n>
+        <button data-lang="zh">中文</button>
+        <button data-lang="en">English</button>
+      </div>
+
+      <h3>桌面行为</h3>
+      <label class="autoRow">
+        <span>开机自动启动</span>
+        <input type="checkbox" id="autoStartChk" />
+      </label>
+      <label class="autoRow">
+        <span>新任务系统通知</span>
+        <input type="checkbox" id="notifyTaskChk" />
+      </label>
+      <label class="autoRow">
+        <span>截止 / 提醒通知</span>
+        <input type="checkbox" id="notifyDueChk" />
+      </label>
+      <p class="tips">系统通知只在应用运行（含收到托盘）时有效。首次加入或第一次同步团队时只提示一条汇总，不会把历史任务逐条弹出来。</p>
+      <p class="tips">鼠标移开便签会收成只显示任务的小条，移回来展开。点右上角 ✕ 是收到托盘（不是退出），右键托盘图标可以退出。</p>
+
+      <div class="settingsDivider"></div>
+
+      <h3>数据与备份</h3>
+      <div class="backupRow">
+        <button class="secondary" id="exportDataBtn">导出备份</button>
+        <button class="secondary" id="importDataBtn">导入备份</button>
+      </div>
+      <p class="tips">导出会包含团队、任务、设置和登录令牌，请妥善保管。自动备份保存在数据目录的 backups 文件夹，最近 7 天保留。</p>
+      <p class="tips">导入会覆盖当前所有数据并自动重启；导入前会先保留一份当前备份。</p>
+
+      <div class="settingsDivider"></div>
+
+      <h3>AI 文件整合接口</h3>
+      <div class="aiBox" id="aiBox">正在准备 AI 接口…</div>
+      <div class="backupRow">
+        <button class="secondary" id="aiCopyBtn">复制接口信息</button>
+      </div>
+      <p class="tips">workbuddy、豆包等 AI 软件可以读取这里的任务、文件和模板字段，做文件整合与数据分析。接口只监听本机，需要下面这串令牌。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 单个团队：成员 / 邀请 / 权限 -->
+  <div class="overlay hidden" id="teamPanel">
+    <div class="card teamMgmtCard">
+      <button class="cardClose" id="teamClose">✕</button>
+      <div class="cardScroll teamScroll">
+      <div class="teamNameRow">
+        <h2 id="teamTitle">团队</h2>
+        <button class="teamNameEdit hidden" id="teamNameEdit" title="修改团队名" aria-label="修改团队名">✎</button>
+        <input class="teamNameInput hidden" id="teamNameInput" maxlength="20" autocomplete="off" spellcheck="false" aria-label="团队名称" />
+        <button class="secondary teamNameSave hidden" id="teamNameSave">保存</button>
+      </div>
+      <div class="teamMeta" id="teamMeta"></div>
+
+      <div class="teamFilesBox hidden" id="teamFilesBox">
+        <div class="teamFilesHead">
+          <h3>文件存放位置</h3>
+          <button class="miniBtn hidden" id="teamFilesChange">修改位置</button>
+        </div>
+        <div class="teamFilesPath" id="teamFilesPathLabel"></div>
+        <div class="rowBtns teamFilesBtns">
+          <button class="secondary hidden" id="teamFilesOpen">打开文件夹</button>
+        </div>
+        <p class="tips" id="teamFilesNote"></p>
+      </div>
+
+      <div id="inviteBox" class="hidden">
+        <div class="inviteLabel">邀请码</div>
+        <div class="codeLine" id="codeLine"></div>
+        <div class="inviteTimer" id="codeTimer"></div>
+        <div class="rowBtns inviteBtns">
+          <button class="primary" id="btnCopy">复制邀请码</button>
+          <button class="ghost" id="btnRegen">重新生成</button>
+        </div>
+        <div class="netBox" id="netBox"></div>
+      </div>
+
+      <div id="deviceBox" class="deviceBox hidden">
+        <div class="teamFilesHead">
+          <h3>手机 / 第二台设备</h3>
+          <button class="miniBtn" id="btnDeviceLink">生成登录链接</button>
+        </div>
+        <p class="tips">每个成员一个长期设备码；只有创建者能查看、编辑、重置。设备码登录的是这位成员本人，不会新增成员。</p>
+        <label class="field tiny">
+          <span>成员</span>
+          <select id="deviceMember"></select>
+        </label>
+        <div class="deviceCodeRow">
+          <input id="deviceCodeInput" maxlength="6" placeholder="6 位设备码" autocomplete="off" spellcheck="false" />
+          <button class="secondary" id="btnDeviceSave">保存</button>
+          <button class="secondary" id="btnDeviceReset">重置</button>
+        </div>
+        <p class="tips" id="deviceCodeHint">手机端只查看当前任务和发布任务，不显示文件。</p>
+        <div class="deviceLinkText" id="deviceLinkText">还没有生成登录链接</div>
+        <div class="rowBtns">
+          <button class="secondary" id="btnDeviceCopy" disabled>复制链接</button>
+        </div>
+        <p class="tips" id="deviceLinkNote"></p>
+      </div>
+
+      <div id="reqArea" class="hidden">
+        <h3>加入申请 <span id="reqCount">0</span></h3>
+        <div class="reqList" id="reqList"></div>
+      </div>
+
+      <h3>成员 <span id="memberCount">0</span></h3>
+      <div class="memberProgress hidden" id="memberProgress"></div>
+      <div class="memberRowsMg" id="memberRows"></div>
+      <p class="tips" id="membersTip"></p>
+      <button class="ghost dangerText wide" id="btnLeave">退出这个团队</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成员任务统计 -->
+  <div class="overlay hidden" id="memberStatsPanel">
+    <div class="card memberStatsCard">
+      <button class="cardClose" id="memberStatsClose">✕</button>
+      <div class="memberStatsHead">
+        <span class="bigAvatar" id="memberStatsAvatar">👤</span>
+        <div class="memberStatsTitle">
+          <h2 id="memberStatsName"></h2>
+          <p class="sub" id="memberStatsSub"></p>
+        </div>
+      </div>
+      <div class="memberStatsGrid">
+        <div class="memberStat">
+          <div class="memberStatLabel">目前待办</div>
+          <div class="memberStatValue" id="memberStatsTotal">—</div>
+          <div class="memberStatSub" id="memberStatsTotalSub"></div>
+        </div>
+        <div class="memberStat">
+          <div class="memberStatLabel">本团队待完成</div>
+          <div class="memberStatValue" id="memberStatsTeam">0</div>
+          <div class="memberStatSub" id="memberStatsTeamSub"></div>
+        </div>
+      </div>
+      <p class="tips" id="memberStatsHint">只同步待办数量，不同步任务内容；打开面板会拉取最新数据。</p>
+    </div>
+  </div>
+
+  <!-- 邀请 -->
+  <div class="overlay hidden" id="invitePanel">
+    <div class="card">
+      <button class="cardClose" id="inviteClose">✕</button>
+      <h2 id="inviteTitle">邀请同事加入</h2>
+      <p class="sub" id="inviteSub">把邀请码发给同事，对方填码申请，你同意后就进来。</p>
+      <div class="inviteLabel">邀请码</div>
+      <div class="codeLine" id="inviteCodeLine"></div>
+      <div class="inviteTimer" id="inviteCodeTimer"></div>
+      <div class="rowBtns">
+        <button class="primary" id="inviteCopy">复制邀请码</button>
+        <button class="ghost hidden" id="inviteRegen">重新生成</button>
+      </div>
+      <div class="netBox" id="inviteNetBox"></div>
+      <p class="tips">不要求在同一网络：对方在家、你在公司，只要填这个码就能申请。</p>
+    </div>
+  </div>
+
+  <!-- 已完成 -->
+  <div class="overlay hidden" id="donePanel">
+    <div class="card doneCard">
+      <button class="cardClose" id="doneClose">✕</button>
+      <h2>已完成 <span class="count" id="doneTotal">0</span></h2>
+      <div class="searchWrap">
+        <span class="searchIco">⌕</span>
+        <input id="doneSearch" placeholder="搜任务内容、人名、团队" autocomplete="off" />
+        <button class="clearSearch hidden" id="clearSearch">✕</button>
+      </div>
+      <div class="doneAll" id="doneAll"></div>
+      <p class="tips">按完成时间倒序；双击已完成的一条可以恢复成未完成。标着「已关闭」的由发起人或管理员关掉，只留记录、不能恢复；发起人双击可彻底删除这条记录。</p>
+    </div>
+  </div>
+
+  <!-- 团队通知 -->
+  <div class="overlay hidden" id="noticePanel">
+    <div class="card noticeEditCard">
+      <button class="cardClose" id="noticeClose">✕</button>
+      <h2 id="noticeTitle">发团队通知</h2>
+      <div class="noticeEditorBox">
+        <div class="noticeEditorHint">通知内容（网页链接会自动变成可点链接）</div>
+        <textarea id="noticeText" maxlength="300" autocomplete="off"></textarea>
+      </div>
+      <div class="noticeEditFoot">
+        <button class="primary" id="noticeSave">发出</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务文件（拖动 / 选择 / 替换） -->
+  <div class="overlay hidden" id="attachPanel">
+    <div class="card attachCard">
+      <button class="cardClose" id="attachClose">✕</button>
+      <h2 id="attachTitle">任务文件</h2>
+      <p class="sub" id="attachSub">把文件从桌面或微信直接拖进来，也可以点击选择</p>
+      <div class="attachDrop" id="attachDrop">
+        <span class="attachIcon">💻</span>
+        <b>拖文件到这里</b>
+        <span class="muted">或点击选择文件</span>
+      </div>
+      <input type="file" id="attachInput" class="hidden" />
+      <div class="attachInfo" id="attachInfo"></div>
+      <div class="rowBtns">
+        <button class="ghost hidden" id="attachPick">换一个文件</button>
+        <button class="ghost" id="attachCancel">取消</button>
+        <button class="primary" id="attachSave">保存文件</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务模板 -->
+  <div class="overlay hidden" id="templatePanel">
+    <div class="card templateCard">
+      <button class="cardClose" id="templateClose">✕</button>
+      <h2>任务模板</h2>
+      <p class="sub">模板里的每一行是一个字段名和默认值；发布任务时可以调用，之后再改。</p>
+      <label class="field">
+        <span>模板名称</span>
+        <input id="templateName" maxlength="20" placeholder="比如：客户需求 / 设计交付" />
+      </label>
+      <div class="templateRows" id="templateRows"></div>
+      <button class="ghost tinyBtn" id="templateAddRow">＋ 新增一行字段</button>
+      <div class="templateSavedHead">
+        <span>已保存模板 <b id="templateCount">0 / 5</b></span>
+        <button class="miniBtn" id="templateNew">＋ 新建模板</button>
+      </div>
+      <div class="templateSaved" id="templateSaved"></div>
+      <div class="rowBtns">
+        <button class="ghost" id="templateCancel">取消</button>
+        <button class="primary" id="templateSave">保存模板</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编辑任务 -->
+  <div class="overlay hidden" id="taskEditPanel">
+    <div class="card noticeEditCard taskEditCard">
+      <button class="cardClose" id="taskEditClose">✕</button>
+      <h2 id="taskEditTitle">编辑任务</h2>
+      <div class="taskProgressBox" id="taskProgressBox">
+        <div class="progressHead">
+          <span id="taskProgressLabel">任务进度</span>
+          <b id="taskProgressValue">0%</b>
+        </div>
+        <input type="range" id="taskProgressRange" min="0" max="100" step="5" value="0" />
+        <div class="progressScale" id="taskProgressScale"><span>0%</span><span>50%</span><span>100%</span></div>
+        <div class="progressOverall hidden" id="taskProgressOverall">总进度 <b id="taskProgressOverallValue">0%</b></div>
+        <div class="progressMembers" id="taskProgressMembers"></div>
+        <p class="tips" id="taskProgressHint"></p>
+        <div class="progressSubmitRow hidden" id="progressSubmitRow">
+          <button class="ghost tinyBtn" id="progressSubmitBtn">完成并提交给创建者</button>
+        </div>
+      </div>
+      <div class="noticeEditorBox">
+        <div class="noticeEditorHint">任务内容（可以多行，保存后按原样显示）</div>
+        <textarea id="taskEditText" autocomplete="off"></textarea>
+      </div>
+      <div class="taskFieldsBox hidden" id="taskFieldsBox">
+        <div class="taskEditLinkLabel">模板字段</div>
+        <div id="taskFieldsList"></div>
+      </div>
+      <div class="taskFileBox hidden" id="taskFileBox">
+        <div class="taskEditLinkLabel">任务文件</div>
+        <div class="taskFileRow">
+          <b id="taskFileName"></b>
+          <button class="ghost tinyBtn" id="taskFileOpen">打开 / 编辑</button>
+          <button class="ghost tinyBtn" id="taskFileUpload">上传新版本</button>
+        </div>
+        <p class="tips" id="taskFileHint"></p>
+      </div>
+      <div class="taskEditLinkBlock" id="taskEditLinkBlock">
+        <div class="taskEditLinkBar">
+          <span class="taskEditLinkLabel" id="taskEditLinkLabel">任务链接</span>
+          <button class="linkBtn" id="taskEditLinkUrl" title="添加网页链接" aria-label="添加网页链接"><span class="linkIco">🌐</span></button>
+          <button class="linkBtn hidden" id="taskEditLinkPath" title="添加本地路径" aria-label="添加本地路径"><span class="linkIco">💻</span></button>
+          <button class="taskEditLinkClear hidden" id="taskEditLinkClear">清除</button>
+        </div>
+        <div class="taskEditLinkStatus" id="taskEditLinkStatus">未添加链接</div>
+        <div class="taskEditLinkRow hidden" id="taskEditLinkRow">
+          <input id="taskEditLinkInput" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="https://example.com">
+          <button class="primary" id="taskEditLinkOk">确定</button>
+        </div>
+      </div>
+      <div class="noticeEditFoot taskEditFoot">
+        <button class="ghost" id="taskEditCancel">取消</button>
+        <button class="primary" id="taskEditSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通知全文 -->
+  <div class="overlay hidden" id="noticeView">
+    <div class="card noticeViewCard">
+      <button class="cardClose" id="noticeViewClose">✕</button>
+      <h2>团队通知</h2>
+      <div class="noticeFull" id="noticeViewBody"></div>
+      <p class="tips" id="noticeViewMeta"></p>
+    </div>
+  </div>
+
+  <!-- 截止 / 提醒 -->
+  <div class="overlay hidden" id="duePanel">
+    <div class="card dueCard">
+      <button class="cardClose" id="dueClose">✕</button>
+      <h2>截止时间与提醒</h2>
+
+      <div id="dueMain">
+        <label class="field dueField">
+          <span>截止时间（可留空）</span>
+          <div class="dateBox">
+            <button class="calBtn" id="dueCalBtn" type="button" title="选择日期">📅</button>
+            <input type="text" id="dueTime" readonly placeholder="选择截止时间" />
+          </div>
+        </label>
+        <button class="ghost tinyBtn" id="clearDue">不设截止时间</button>
+        <h3>提前提醒</h3>
+        <div class="remindBox">
+          <div class="remindList" id="remindList"></div>
+        </div>
+        <p class="tips">滚动选 1–48 小时…</p>
+        <div class="rowBtns">
+          <button class="ghost" id="dueCancel">取消</button>
+          <button class="primary" id="dueSave">保存</button>
+        </div>
+      </div>
+
+      <div id="duePickerView" class="hidden">
+        <div class="dateNav">
+          <button class="dateNavBtn" id="calPrev" type="button" aria-label="上个月">‹</button>
+          <b id="calMonth">2026 年 11 月</b>
+          <button class="dateNavBtn" id="calNext" type="button" aria-label="下个月">›</button>
+        </div>
+        <div class="calWeekdays" id="calWeekdays"></div>
+        <div class="calGrid" id="calGrid"></div>
+        <div class="datePreview" id="datePreview"></div>
+        <div class="timeWheels">
+          <div class="timeCol">
+            <span>时</span>
+            <div class="timeWheel" id="hourWheel"></div>
+          </div>
+          <i>:</i>
+          <div class="timeCol">
+            <span>分</span>
+            <div class="timeWheel" id="minuteWheel"></div>
+          </div>
+        </div>
+        <div class="rowBtns pickerBtns">
+          <button class="ghost" id="dateCancel">返回</button>
+          <button class="primary" id="dateOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 等待审批 -->
+  <div class="overlay hidden" id="waitPanel">
+    <div class="card waitCard">
+      <div class="waitDot"></div>
+      <h2>已提交加入申请</h2>
+      <p class="sub" id="waitSub">等待创建者同意…</p>
+      <p class="tips">创建者会在他的 App 里看到你的头像和名字，同意后自动进入。</p>
+      <button class="ghost" id="btnCancelWait">取消申请</button>
+    </div>
+  </div>
+
+  <!-- 通用确认（主界面风格，不用系统 confirm） -->
+  <div class="overlay hidden" id="confirmPanel">
+    <div class="card confirmCard">
+      <h2 id="confirmTitle">确认</h2>
+      <p class="confirmBody" id="confirmBody"></p>
+      <div class="rowBtns confirmBtns">
+        <button class="ghost" id="confirmCancel">取消</button>
+        <button class="primary" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="menu hidden" id="menu"></div>
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

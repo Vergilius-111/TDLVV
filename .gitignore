@@ -1,0 +1,15 @@
+# 依赖与产物
+node_modules/
+dist/
+*.dmg
+*.zip
+*.exe
+
+# 本机数据与调试目录
+.dev-data/
+task-files/
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
