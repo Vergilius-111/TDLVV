@@ -24,6 +24,7 @@ const { Tunnel } = require('./tunnel');
 const mapping = require('./mapping');
 const updater = require('./updater');
 const portal = require('./portal');
+const startup = require('./startup');
 
 const SHOT = process.argv.includes('--shot');
 // 调试用：启动后直接显示窗口（正常启动时命名过就只留托盘，方便调试时找不到窗口）
@@ -106,7 +107,8 @@ const ctx = {
   updateProxy: '', // 可选的下载加速前缀，空则直连 GitHub
   relayUrl: '', // 自有地址中继服务根地址，空则用 ntfy.sh
   portalCode: '', // 主页设备码：一个码看到「我」的全部团队，以本人身份操作
-  clientId: '' // 本机安装标识：重新入群时让创建者认出是同一个人，避免幽灵成员
+  clientId: '', // 本机安装标识：重新入群时让创建者认出是同一个人，避免幽灵成员
+  lastLaunchedVersion: '' // 上次启动的版本：新装或升级后首次启动主动弹主界面
 };
 
 let taskFiles = null;
@@ -283,7 +285,8 @@ function prefsPayload() {
     updateProxy: ctx.updateProxy || '',
     relayUrl: ctx.relayUrl || '',
     portalCode: ctx.portalCode || '',
-    clientId: ctx.clientId || ''
+    clientId: ctx.clientId || '',
+    lastLaunchedVersion: ctx.lastLaunchedVersion || ''
   };
 }
 
@@ -421,6 +424,7 @@ function applyPrefs(prefs) {
   ctx.updateProxy = String(p.updateProxy || '').trim().replace(/\/+$/, '');
   ctx.relayUrl = String(p.relayUrl || '');
   ctx.portalCode = String(p.portalCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+  ctx.lastLaunchedVersion = String(p.lastLaunchedVersion || '');
   ctx.clientId = String(p.clientId || '').trim().slice(0, 64);
   if (!ctx.clientId) {
     // 首次启动生成一个持久安装标识；不随名字/邀请码变化，只随数据目录消失
@@ -1640,12 +1644,22 @@ function createWindow() {
   win.once('ready-to-show', () => {
     applyFontSize();
     hideFromTaskbar();
-    // 已起过名字：启动后只留后台进程 + 托盘，不弹前台窗口；首次使用才显示起名字界面
-    const showOnStart = SHOT || SHOW_WINDOW || !ctx.named;
+    // 新安装或升级后首次启动主动弹主界面；日常启动（版本未变且已起名）只留后台托盘
+    const freshRun = startup.isFreshRun(ctx.lastLaunchedVersion, app.getVersion());
+    const showOnStart = startup.shouldShowOnStart({
+      shot: SHOT,
+      showWindow: SHOW_WINDOW,
+      named: ctx.named,
+      freshRun
+    });
     if (showOnStart) {
       win.show();
       hideFromTaskbar();
       if (ctx.pin) win.setAlwaysOnTop(true, 'floating');
+      if (freshRun) {
+        ctx.lastLaunchedVersion = app.getVersion();
+        savePrefs();
+      }
     } else if (process.platform === 'darwin' && app.dock) {
       try {
         app.dock.hide();
