@@ -1,7 +1,7 @@
 {
   "name": "tasknotes",
   "productName": "TDLVV",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "description": "TDLVV 任务便签 - 多团队共享的桌面待办（截止/提醒/成员角色）",
   "main": "src/main.js",
   "author": "TDLVV",

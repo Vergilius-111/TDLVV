@@ -1002,6 +1002,22 @@ async function refreshTeam(t) {
 /* ---------------- 加入审批 ---------------- */
 let statusTimer = null;
 
+/**
+ * 同名团队去重：保留最新加入的，移除旧的 client 同名团队。
+ * 场景：成员被移出/退出后重新加入创建人的同名团队时，旧的本地记录没删，
+ * 切换栏会出现两个同名团队。新团队加入时清理掉旧的同名记录，只留最新的。
+ */
+function dedupeSameNameTeams(name, keepId) {
+  const { teams, removed } = store.dedupeTeamsByName(ctx.teams, name, keepId);
+  ctx.teams = teams;
+  for (const old of removed) {
+    stopPoll(old);
+    if (old.tunnel) { try { old.tunnel.stop(); } catch (e) {} }
+    if (old.publishTimer) clearInterval(old.publishTimer);
+  }
+  return removed.length;
+}
+
 function startJoinStatusPoll() {
   if (statusTimer) clearInterval(statusTimer);
   statusTimer = setInterval(checkJoinStatus, 1000);
@@ -1035,6 +1051,8 @@ async function checkJoinStatus() {
         failCount: 0,
         lastRev: s.state.rev
       };
+      // 同名团队去重：被移出/退出后重新加入同名团队，只保留最新加入的这个
+      dedupeSameNameTeams(s.state.boardName, team.id);
       ctx.teams.push(team);
       ctx.activeId = team.id;
       ctx.pending = null;

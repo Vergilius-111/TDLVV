@@ -8,7 +8,7 @@ rem  用法：确认脚本内容无误后双击运行；运行开始还会再暂
 rem  升级版本时只需改下面 VER 两处：本行 + pc\package.json 的 version。
 rem ============================================================
 set "ROOT=D:\wb\2026-11-27-09-27-53\TDLVV-src"
-set "VER=0.6.9"
+set "VER=0.6.10"
 set "DL=C:\Users\SU\Downloads"
 set "NODE=%ROOT%\pc\node_modules"
 

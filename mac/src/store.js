@@ -720,8 +720,25 @@ function apply(state, action, actorId) {
   return true;
 }
 
+/**
+ * 同名团队去重：在保留 keepId 团队的前提下，找出所有同名的 client 团队。
+ * 场景：成员被移出/退出后重新加入创建人的同名团队，旧的本地记录没删，
+ * 切换栏会出现两个同名团队。加入新团队时调用，只留最新加入的那个。
+ * 纯函数：不修改入参，返回 { teams, removed }，由调用方负责清理被移除团队的资源。
+ */
+function dedupeTeamsByName(teams, name, keepId) {
+  const key = String(name || '').trim();
+  if (!key || !Array.isArray(teams)) return { teams, removed: [] };
+  const removed = teams.filter(
+    (t) => t.id !== keepId && t.kind === 'client' && String(t.name || '').trim() === key
+  );
+  if (!removed.length) return { teams, removed: [] };
+  return { teams: teams.filter((t) => !removed.includes(t)), removed };
+}
+
 module.exports = {
   AVATARS,
+  dedupeTeamsByName,
   HOST_ID,
   PRESENCE_OFFLINE_MS,
   expirePresence,
