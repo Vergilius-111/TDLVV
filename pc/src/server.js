@@ -128,6 +128,32 @@ function startHost(opts) {
   const VIEWER_ID = '__viewer__'; // 查看者的虚拟成员 id（只读，不在 members 列表里）
   let viewerCode = String(opts.viewerCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
 
+  // 启动时合并历史遗留的同名幽灵成员（同一人断连重进留下的重复 id），
+  // 并把 token / 设备码迁到保留 id，避免「一个离线一个在线」和统计分母错乱。
+  function migrateDuplicateMembers() {
+    const map = store.mergeDuplicateMembers(state);
+    const ids = Object.keys(map);
+    if (!ids.length) return false;
+    for (const [tok, id] of tokens) {
+      if (map[id]) tokens.set(tok, map[id]);
+    }
+    for (const [oldId, code] of memberCodes) {
+      if (map[oldId]) {
+        memberCodes.delete(oldId);
+        memberCodes.set(map[oldId], code);
+      }
+    }
+    // 已退出列表里的旧 id 也一并换掉，避免复活时又生成幽灵
+    if (Array.isArray(state.leftMembers)) {
+      state.leftMembers.forEach((m) => { if (m && map[m.id]) m.id = map[m.id]; });
+    }
+    state.rev++;
+    persistTokens();
+    persistCodes();
+    changed('merge-members');
+    return true;
+  }
+
   function isViewer(member) {
     return !!member && member.id === VIEWER_ID;
   }
@@ -403,7 +429,17 @@ function startHost(opts) {
     const p = takeApproval(requestId, actorId);
     if (!p.ok) return p;
     const req = p.req;
-    const member = store.addMember(state, req.name, req.avatar);
+    // 按安装标识复用身份：同一个人断连后重新进群，还是原来的成员 id，不再多出一个同名幽灵
+    let member = store.findMemberByClientId(state, req.clientId);
+    if (member) {
+      store.reviveMember(state, member);
+      if (req.name && member.name !== req.name) member.name = String(req.name).slice(0, 12);
+      if (req.avatar) member.avatar = req.avatar;
+      // 旧 token 全部失效，只保留这次新发的，避免旧连接继续心跳造成状态错乱
+      for (const [tok, id] of tokens) if (id === member.id) tokens.delete(tok);
+    } else {
+      member = store.addMember(state, req.name, req.avatar, req.clientId);
+    }
     const token = store.rid(24);
     tokens.set(token, member.id);
     results.set(requestId, { status: 'approved', token, memberId: member.id, at: Date.now() });
@@ -478,7 +514,8 @@ function startHost(opts) {
         }
         const name = String(body.name || '').trim().slice(0, 12);
         if (!name) return send(res, 400, { error: '请填写你的名字' });
-        const reqObj = store.addPending(state, name, body.avatar);
+        const clientId = String(body.clientId || '').trim().slice(0, 64);
+        const reqObj = store.addPending(state, name, body.avatar, clientId);
         changed('pending');
         return send(res, 200, {
           ok: true,
@@ -723,6 +760,11 @@ function startHost(opts) {
     if (typeof opts.onListen === 'function') opts.onListen(server.address().port);
   });
 
+  // 启动合并 + 定时兜底（有人重新入群后可能产生新的同名成员）
+  migrateDuplicateMembers();
+  const mergeTimer = setInterval(migrateDuplicateMembers, 60 * 1000);
+  if (mergeTimer.unref) mergeTimer.unref();
+
   // 静默心跳：每 10 秒扫描一次成员在线状态（离线阈值 45 秒）
   const presenceTimer = setInterval(scanPresence, 10000);
   if (presenceTimer.unref) presenceTimer.unref();
@@ -734,6 +776,7 @@ function startHost(opts) {
       return a && a.port ? a.port : 0;
     },
     close() {
+      try { clearInterval(mergeTimer); } catch (e) { /* ignore */ }
       try { clearInterval(presenceTimer); } catch (e) { /* ignore */ }
       try {
         server.close();

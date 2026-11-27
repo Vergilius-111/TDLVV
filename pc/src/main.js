@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, clipboard, shell, Notification, Tray, Menu,
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const dgram = require('dgram');
 const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
@@ -104,7 +105,8 @@ const ctx = {
   updateSeen: '', // 已经提示过的新版本号，避免每次启动反复弹窗
   updateProxy: '', // 可选的下载加速前缀，空则直连 GitHub
   relayUrl: '', // 自有地址中继服务根地址，空则用 ntfy.sh
-  portalCode: '' // 主页设备码：一个码看到「我」的全部团队，以本人身份操作
+  portalCode: '', // 主页设备码：一个码看到「我」的全部团队，以本人身份操作
+  clientId: '' // 本机安装标识：重新入群时让创建者认出是同一个人，避免幽灵成员
 };
 
 let taskFiles = null;
@@ -244,6 +246,8 @@ function storedTeam(t) {
     meId: t.meId,
     code: t.code || '',
     baseUrl: t.baseUrl || '',
+    via: t.via || '',
+    boardId: t.boardId || '',
     token: t.token || '',
     tokens: t.tokens || {},
     deviceCodes: t.deviceCodes || {},
@@ -278,7 +282,8 @@ function prefsPayload() {
     updateSeen: ctx.updateSeen || '',
     updateProxy: ctx.updateProxy || '',
     relayUrl: ctx.relayUrl || '',
-    portalCode: ctx.portalCode || ''
+    portalCode: ctx.portalCode || '',
+    clientId: ctx.clientId || ''
   };
 }
 
@@ -416,6 +421,12 @@ function applyPrefs(prefs) {
   ctx.updateProxy = String(p.updateProxy || '').trim().replace(/\/+$/, '');
   ctx.relayUrl = String(p.relayUrl || '');
   ctx.portalCode = String(p.portalCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+  ctx.clientId = String(p.clientId || '').trim().slice(0, 64);
+  if (!ctx.clientId) {
+    // 首次启动生成一个持久安装标识；不随名字/邀请码变化，只随数据目录消失
+    ctx.clientId = crypto.randomUUID ? crypto.randomUUID() : store.rid(24);
+    savePrefs();
+  }
   mapping.setRelayUrl(ctx.relayUrl);
 }
 
@@ -431,6 +442,8 @@ function applyTeamsData(data) {
     meId: t.meId,
     code: t.code || '',
     baseUrl: t.baseUrl || '',
+    via: t.via || '',
+    boardId: t.boardId || '',
     token: t.token || '',
     tokens: t.tokens || {},
     deviceCodes: t.deviceCodes || {},
@@ -660,6 +673,7 @@ function startBeacon() {
         JSON.stringify({
           app: 'tdlvv',
           code: t.state.inviteCode,
+          bid: t.state.boardId || '', // 稳定标识：邀请码轮换后成员仍能按它找到本机
           port: t.hostPort,
           board: t.state.boardName,
           owner: store.displayName(t.state.members[0])
@@ -993,16 +1007,18 @@ async function refreshTeam(t) {
       t.error = '连不上创建者，正在重连…';
       push();
     }
-    // 每失败 2 次重新解析地址；用 stable boardId 优先，旧邀请码兜底。
-    // 5 秒节流，避免 ntfy/中继被高频查询拖慢。
-    if (t.failCount % 2 === 0 && now - (t.lastResolveAt || 0) >= 5000) {
+    // 每失败 1 次就重新解析地址；同网段优先直连（最稳），异地再查公网映射。
+    // 3 秒节流，避免 ntfy/中继被高频查询拖慢；局域网探测仅 1.5 秒，代价很小。
+    if (now - (t.lastResolveAt || 0) >= 3000) {
       const stableId = t.boardId || (t.state && t.state.boardId) || '';
       if (stableId || t.code) {
         t.lastResolveAt = now;
         try {
-          const found = await resolveHost(stableId || t.code, '', stableId ? t.code : '');
+          // 传 boardId 让局域网发现能匹配轮换后的邀请码；fallbackCode 用于异地查映射
+          const found = await resolveHost(t.code || '', '', stableId || t.code, stableId);
           if (found && found.baseUrl !== t.baseUrl) {
             t.baseUrl = found.baseUrl;
+            t.via = found.via || '';
             t.firstFailAt = 0;
             saveTeams();
           }
@@ -1062,6 +1078,7 @@ async function checkJoinStatus() {
         code: p.code,
         boardId: s.state.boardId || '',
         baseUrl: p.baseUrl,
+        via: p.via || '',
         token: s.token,
         state: s.state,
         online: true,
@@ -1123,6 +1140,9 @@ function serializeTeam(t) {
     tunnelUrl: t.tunnelUrl || '',
     tunnelState: t.tunnelState || 'off',
     mapState: t.mapState || '',
+    // 成员看当前实际连到哪个地址（内网 192.168 或公网隧道），便于排查断连
+    connectionUrl: t.kind === 'client' ? (t.baseUrl || '') : '',
+    connectionVia: t.kind === 'client' ? (t.via || '') : '',
     filesRoot: (t.state && t.state.filesRoot) || (t.kind === 'host' ? t.filesRoot : '') || '',
     state
   };
@@ -2281,10 +2301,11 @@ function registerIpc() {
     }
     try {
       const r = new Remote({ baseUrl: found.baseUrl });
-      const res = await r.join(clean, ctx.myName, ctx.avatar);
+      const res = await r.join(clean, ctx.myName, ctx.avatar, ctx.clientId);
       ctx.pending = {
         requestId: res.requestId,
         baseUrl: found.baseUrl,
+        via: found.via || '',
         code: clean,
         board: res.board,
         owner: res.owner

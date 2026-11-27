@@ -120,13 +120,20 @@ function memberColor(state) {
   return MEMBER_COLORS[state.members.length % MEMBER_COLORS.length];
 }
 
-function addPending(state, name, avatar) {
+function addPending(state, name, avatar, clientId) {
   const clean = String(name || '').trim().slice(0, 12);
   if (!clean) return null;
   const req = { id: rid(8), name: clean, avatar: avatar || AVATARS[0], createdAt: Date.now() };
+  const cid = String(clientId || '').trim();
+  if (cid) req.clientId = cid;
   state.pending.push(req);
-  // 同一个人重复申请，只保留最新一条
-  state.pending = state.pending.filter((p) => p.name !== clean || p.id === req.id);
+  // 同一个人重复申请，只保留最新一条：优先按安装标识，没有再按名字
+  state.pending = state.pending.filter((p) => {
+    const same = cid && p.clientId
+      ? p.clientId === cid
+      : p.name === clean;
+    return !same || p.id === req.id;
+  });
   state.rev++;
   return req;
 }
@@ -144,7 +151,7 @@ function takePending(state, requestId) {
   return req;
 }
 
-function addMember(state, name, avatar) {
+function addMember(state, name, avatar, clientId) {
   const clean = String(name || '').trim().slice(0, 12);
   if (!clean) return null;
   const m = {
@@ -159,9 +166,95 @@ function addMember(state, name, avatar) {
     lastSeen: Date.now(),
     online: true
   };
+  const cid = String(clientId || '').trim();
+  if (cid) m.clientId = cid;
   state.members.push(m);
   state.rev++;
   return m;
+}
+
+/** 按安装标识找已有成员（含已退出的），用于重新入群时复用同一个 id，避免幽灵成员 */
+function findMemberByClientId(state, clientId) {
+  const cid = String(clientId || '').trim();
+  if (!cid) return null;
+  const inMembers = (state.members || []).find((m) => m && m.clientId === cid);
+  if (inMembers) return inMembers;
+  const inLeft = (state.leftMembers || []).find((m) => m && m.clientId === cid);
+  return inLeft || null;
+}
+
+/** 复活一个已退出的成员：移回成员列表、恢复在线；返回实际用的成员对象 */
+function reviveMember(state, member) {
+  if (!member) return null;
+  const left = state.leftMembers || [];
+  const idx = left.findIndex((m) => m && m.id === member.id);
+  if (idx >= 0) left.splice(idx, 1);
+  if (!(state.members || []).some((m) => m && m.id === member.id)) state.members.push(member);
+  member.lastSeen = Date.now();
+  member.online = true;
+  state.rev++;
+  return member;
+}
+
+/**
+ * 合并同名幽灵成员：同一个安装 clientId 相同，或历史遗留同名非创建者成员，
+ * 只保留最近活跃的那个，把旧 id 在任务里的引用（指派/完成/个人文件）迁到保留 id。
+ * 返回 {oldId: keepId} 映射，供服务端把 token/设备码一并迁移。
+ */
+function mergeDuplicateMembers(state) {
+  const map = {};
+  const groups = new Map();
+  (state.members || []).forEach((m) => {
+    if (!m || m.role === 'owner' || m.id === HOST_ID) return;
+    const key = String(m.name || '').trim();
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  });
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    // 只合并"同一身份"的重复：clientId 相同，或至少一方没有 clientId（历史遗留）。
+    // 两个都有各自不同 clientId 的同名成员 = 真的是两台不同设备，不能合并。
+    const cids = Array.from(new Set(list.map((m) => m.clientId).filter(Boolean)));
+    const sameIdentity = cids.length <= 1;
+    if (!sameIdentity) continue;
+    // 优先保留有 clientId 的；其次保留最近活跃的
+    list.sort((a, b) => {
+      const ac = a.clientId ? 1 : 0;
+      const bc = b.clientId ? 1 : 0;
+      if (ac !== bc) return bc - ac;
+      return (Number(b.lastSeen) || 0) - (Number(a.lastSeen) || 0);
+    });
+    const keep = list[0];
+    const dups = list.slice(1);
+    for (const old of dups) {
+      map[old.id] = keep.id;
+      remapMemberRefs(state, old.id, keep.id);
+    }
+    state.members = state.members.filter((m) => !dups.includes(m));
+    state.rev++;
+  }
+  return map;
+}
+
+/** 把成员 id 的所有引用从 fromId 改到 toId（幽灵成员合并时用） */
+function remapMemberRefs(state, fromId, toId) {
+  if (!fromId || !toId || fromId === toId) return;
+  (state.tasks || []).forEach((t) => {
+    if (Array.isArray(t.assigneeIds)) {
+      t.assigneeIds = Array.from(new Set(t.assigneeIds.map((id) => (id === fromId ? toId : id))));
+    }
+    if (t.assigneeId === fromId) t.assigneeId = toId;
+    if (t.doneById === fromId) t.doneById = toId;
+    if (t.memberFiles && t.memberFiles[fromId]) {
+      if (!t.memberFiles[toId]) t.memberFiles[toId] = t.memberFiles[fromId];
+      delete t.memberFiles[fromId];
+    }
+  });
+  if (state.memberFiles && state.memberFiles[fromId]) {
+    if (!state.memberFiles[toId]) state.memberFiles[toId] = state.memberFiles[fromId];
+    delete state.memberFiles[fromId];
+  }
 }
 
 function touch(state, memberId) {
@@ -753,6 +846,10 @@ module.exports = {
   findPending,
   takePending,
   addMember,
+  findMemberByClientId,
+  reviveMember,
+  mergeDuplicateMembers,
+  remapMemberRefs,
   touch,
   apply,
   displayName,

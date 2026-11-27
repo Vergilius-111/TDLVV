@@ -1752,15 +1752,21 @@ function paintCode(target, code) {
   });
 }
 
+function inviteReallyExpired(team) {
+  const exp = Number(team && team.state && team.state.inviteCodeExpiresAt) || 0;
+  return !!exp && exp <= Date.now();
+}
+
 function inviteRemainText(team) {
   const exp = Number(team && team.state && team.state.inviteCodeExpiresAt) || 0;
   if (!exp) return { expired: false, text: '有效时间 10:00' };
   const left = Math.ceil((exp - Date.now()) / 1000);
   if (left <= 0) {
-    return {
-      expired: true,
-      text: team && team.kind === 'host' ? '邀请码已失效 · 点「重新生成」' : '邀请码已失效 · 请让创建者重新生成'
-    };
+    // 成员侧：邀请码只是"新成员加入"用的，过期不影响已加入的人，不能再误导他们退群重进
+    if (team && team.kind !== 'host') {
+      return { expired: false, text: '你已加入，邀请码仅供新成员使用' };
+    }
+    return { expired: true, text: '邀请码已失效 · 点「重新生成」' };
   }
   return { expired: false, text: `有效时间 ${p2(Math.floor(left / 60))}:${p2(left % 60)}` };
 }
@@ -1775,15 +1781,13 @@ function paintInviteTimer(node, team) {
 function paintInviteTimers() {
   const team = teamById(openTeamId);
   if (team && !el.teamPanel.classList.contains('hidden')) {
-    const st = inviteRemainText(team);
     paintInviteTimer(el.codeTimer, team);
-    el.btnCopy.disabled = st.expired;
+    el.btnCopy.disabled = inviteReallyExpired(team);
   }
   const at = activeTeam();
   if (at && !el.invitePanel.classList.contains('hidden')) {
-    const st = inviteRemainText(at);
     paintInviteTimer(el.inviteCodeTimer, at);
-    el.inviteCopy.disabled = st.expired;
+    el.inviteCopy.disabled = inviteReallyExpired(at);
   }
 }
 
@@ -1809,12 +1813,12 @@ function renderInvitePanel() {
   el.inviteTitle.textContent = `邀请加入「${team.name}」`;
   el.inviteSub.textContent = '把邀请码发给同事，对方填码申请，创建者或管理员同意后就进来。';
   paintCode(el.inviteCodeLine, team.state.inviteCode || '');
-  const timer = inviteRemainText(team);
   paintInviteTimer(el.inviteCodeTimer, team);
   const canRegen = team.kind === 'host' && canManage(team);
   el.inviteRegen.classList.toggle('hidden', !canRegen);
-  el.inviteCopy.disabled = timer.expired;
-  el.inviteCopy.classList.toggle('disabledSoft', timer.expired);
+  const reallyExpired = inviteReallyExpired(team);
+  el.inviteCopy.disabled = reallyExpired;
+  el.inviteCopy.classList.toggle('disabledSoft', reallyExpired);
   el.inviteNetBox.textContent =
     team.kind === 'host'
       ? team.tunnelUrl
@@ -2752,9 +2756,12 @@ function renderNetBox(team) {
       el.netBox.innerHTML = `<span class="bad">公网通道未就绪</span> 现在只有同网段能申请。<br>本机地址：<b>${esc(`${team.hostAddr}:${team.hostPort}`)}</b>`;
     }
   } else {
-    el.netBox.innerHTML = team.online === false
+    const conn = team.connectionUrl
+      ? `<br>连接地址：<b>${esc(team.connectionUrl)}</b>${team.connectionVia === 'lan' ? ' <span class="ok">（局域网直连）</span>' : ''}`
+      : '';
+    el.netBox.innerHTML = (team.online === false
       ? '<span class="bad">暂时连不上创建者</span> 会一直自动重连，期间只显示本地缓存。'
-      : '<span class="ok">已连上创建者</span> 任务修改实时同步。';
+      : '<span class="ok">已连上创建者</span> 任务修改实时同步。') + conn;
   }
 }
 

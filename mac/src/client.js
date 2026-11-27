@@ -114,9 +114,14 @@ class Remote {
     this.token = token || '';
   }
 
-  /** 提交加入申请，返回 {requestId, board, owner} */
-  async join(code, name, avatar) {
-    return request({ baseUrl: this.baseUrl, path: '/api/join', method: 'POST', body: { code, name, avatar } });
+  /** 提交加入申请，返回 {requestId, board, owner}；clientId 让创建者认出这台安装 */
+  async join(code, name, avatar, clientId) {
+    return request({
+      baseUrl: this.baseUrl,
+      path: '/api/join',
+      method: 'POST',
+      body: { code, name, avatar, clientId: clientId || '' }
+    });
   }
 
   /** 轮询审批结果 */
@@ -231,6 +236,7 @@ function collectBeacons(duration = 5000, onEach) {
       const key = `${rinfo.address}:${p.port}:${p.code}`;
       found.set(key, {
         code: String(p.code).toUpperCase(),
+        bid: String(p.bid || '').toUpperCase(),
         board: p.board || '',
         owner: p.owner || '',
         addr: rinfo.address,
@@ -242,10 +248,14 @@ function collectBeacons(duration = 5000, onEach) {
   });
 }
 
-/** 局域网广播发现，找到指定邀请码的主机 */
-function discover(code, timeout = 4000) {
+/**
+ * 局域网广播发现：按邀请码或稳定 boardId 匹配主机。
+ * 邀请码每 10 分钟轮换，成员本地存的旧码匹配不上新广播，所以重连时要用 boardId。
+ */
+function discover(code, timeout = 4000, boardId = '') {
   const target = String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
-  if (!target) return Promise.resolve(null);
+  const targetBid = String(boardId || '').toUpperCase();
+  if (!target && !targetBid) return Promise.resolve(null);
   return new Promise((resolve) => {
     let sock = null;
     let settled = false;
@@ -258,12 +268,24 @@ function discover(code, timeout = 4000) {
       resolve(v);
     };
     sock = openBeacon((p, rinfo) => {
-      if (String(p.code).toUpperCase() === target) {
-        finish({ host: rinfo.address, port: p.port, board: p.board, owner: p.owner });
+      const codeHit = target && String(p.code).toUpperCase() === target;
+      const bidHit = targetBid && String(p.bid || '').toUpperCase() === targetBid;
+      if (codeHit || bidHit) {
+        finish({ host: rinfo.address, port: p.port, board: p.board, owner: p.owner, bid: String(p.bid || '') });
       }
     }, () => finish(null));
     timer = setTimeout(() => finish(null), timeout);
   });
+}
+
+/** 快速探测主机地址是否真的可用：401 说明服务在，只是没带 token */
+async function probeHost(baseUrl) {
+  try {
+    await request({ baseUrl, path: '/api/state', timeout: 2000 });
+    return true;
+  } catch (e) {
+    return !!(e && e.statusCode === 401);
+  }
 }
 
 /** 手动地址：192.168.1.20:51234 或 https://xxx.trycloudflare.com */
@@ -284,18 +306,26 @@ function parseManual(text) {
 }
 
 /**
- * 找主机的顺序：手填地址 → 稳定 boardId/邀请码查映射（自有中继优先，国内可达） → 同网段广播兜底。
- * 邀请码每 10 分钟会换，成员本地存的旧码查不到新地址；所以优先用不会变的 boardId。
+ * 找主机的顺序：手填地址 → 同网段直连（最快最稳，避免绕公网 WiFi 抖动） → 映射查公网地址。
+ * 同局域网的两台电脑必须优先走内网：之前先查公网映射，笔记本 WiFi 连台式机的公网隧道，
+ * 绕一大圈且容易断。邀请码每 10 分钟轮换，所以局域网发现优先用稳定的 boardId 匹配。
  */
-async function resolveHost(code, manual, fallbackCode) {
+async function resolveHost(code, manual, fallbackCode, boardId) {
   if (manual) {
     const m = parseManual(manual);
     if (m) return { baseUrl: m.baseUrl, via: 'manual', board: '' };
   }
-  const mp = await mapping.readAny([code, fallbackCode]);
+  // 1) 同网段直连：用 boardId（稳定）+ 邀请码一起找，探测通了才用，避免选到已退出的旧主机
+  const lan = await discover(code || fallbackCode, 1500, boardId || '');
+  if (lan) {
+    const lanUrl = `http://${lan.host}:${lan.port}`;
+    if (await probeHost(lanUrl)) {
+      return { baseUrl: lanUrl, via: 'lan', board: lan.board || '', owner: lan.owner || '' };
+    }
+  }
+  // 2) 公网映射兜底（异地成员 / 同网段没找到时）
+  const mp = await mapping.readAny([boardId, code, fallbackCode].filter(Boolean));
   if (mp && mp.u) return { baseUrl: mp.u, via: 'relay', board: mp.n || '', owner: mp.o || '' };
-  const lan = await discover(code || fallbackCode, 1500);
-  if (lan) return { baseUrl: `http://${lan.host}:${lan.port}`, via: 'lan', board: lan.board };
   return null;
 }
 
