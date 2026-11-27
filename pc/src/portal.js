@@ -209,7 +209,8 @@ function startPortal(opts) {
         tasks: (st.tasks || [])
           .filter((x) => store.visibleTo(st, x, t.meId))
           .map((x) => taskView(st, x, t.meId)),
-        canPublish: t.kind === 'local' || !!(me && store.isManager(me.role))
+        canPublish: t.kind === 'local' || !!(me && store.isManager(me.role)),
+        canManage: t.kind !== 'local' && !!(me && store.isManager(me.role))
       });
     });
     return { rev, teams: out };

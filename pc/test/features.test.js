@@ -265,14 +265,14 @@ function testAssignPermissions() {
 
   const { state, member } = makeTeam();
   const tid = add(state, '团队任务', {}, store.HOST_ID);
-  // 管理员/发起人可以指派
+  // 团队创建者/管理员可以指派
   storageApply(state, { type: 'editTask', id: tid, assigneeId: member.id }, store.HOST_ID);
   assert.strictEqual(state.tasks[0].assigneeId, member.id);
 
   // 普通成员不能给自己指派，也不能改派别人
   assert.throws(
     () => storageApply(state, { type: 'editTask', id: tid, assigneeId: store.HOST_ID }, member.id),
-    /只有任务发起人或管理员能指派任务/
+    /只有创建者或管理员能指派任务/
   );
   assert.strictEqual(state.tasks[0].assigneeId, member.id, '成员越权改指派必须失败且不改数据');
 

@@ -214,12 +214,15 @@
     .formRow { margin-bottom: 12px; }
     .formRow > label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 5px; font-weight: 600; }
     .formInput {
-      width: 100%; min-height: 42px; border: 1px solid var(--edge); border-radius: 10px;
+      width: 100%; min-width: 0; max-width: 100%; min-height: 42px; border: 1px solid var(--edge); border-radius: 10px;
       background: rgba(255,255,255,0.7); padding: 9px 11px; color: var(--ink); outline: none;
     }
     .formInput:focus { border-color: var(--accent); }
     textarea.formInput { min-height: 84px; resize: vertical; line-height: 1.5; }
-    .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .formGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+    .formGrid > * { min-width: 0; }
+    .formGrid.dateGrid { grid-template-columns: minmax(0, 1fr); }
+    .formGrid.dateGrid input[type="datetime-local"].formInput { width: 100%; min-width: 0; }
     .checkList {
       max-height: 168px; overflow-y: auto; border: 1px solid var(--edge); border-radius: 10px;
       background: rgba(255,255,255,0.6); padding: 4px 8px;
@@ -307,7 +310,7 @@
         <label for="fText">任务内容</label>
         <textarea class="formInput" id="fText" maxlength="500" placeholder="这条任务要做什么？"></textarea>
       </div>
-      <div class="formGrid">
+      <div class="formGrid dateGrid">
         <div class="formRow">
           <label for="fDue">截止时间</label>
           <input class="formInput" type="datetime-local" id="fDue" />
@@ -325,7 +328,7 @@
           </select>
         </div>
       </div>
-      <div class="formRow">
+      <div class="formRow adminOnly" id="fAudRow">
         <label>发布范围</label>
         <div class="segBtns" id="fAudSeg">
           <button class="segBtn on" data-aud="all">👥 全员</button>
@@ -333,15 +336,15 @@
           <button class="segBtn" data-aud="roles">按角色</button>
         </div>
       </div>
-      <div class="formRow" id="fAudMembersBox" hidden>
+      <div class="formRow adminOnly" id="fAudMembersBox" hidden>
         <label>可见成员（勾选）</label>
         <div class="checkList" id="fAudMembers"></div>
       </div>
-      <div class="formRow" id="fAudRolesBox" hidden>
+      <div class="formRow adminOnly" id="fAudRolesBox" hidden>
         <label>可见角色（勾选）</label>
         <div class="checkList" id="fAudRoles"></div>
       </div>
-      <div class="formRow">
+      <div class="formRow adminOnly" id="fAssigneesRow">
         <label>指派给（可多选，决定「几人已完成」的分母）</label>
         <div class="checkList" id="fAssignees"></div>
       </div>
@@ -527,10 +530,12 @@
           due.textContent = '🕒 ' + fmtDue(t.dueAt);
           meta.appendChild(due);
         }
-        const assigneeNames = (Array.isArray(t.assigneeNames) && t.assigneeNames.length) ? t.assigneeNames : (t.assigneeName ? [t.assigneeName] : []);
-        const who = document.createElement('span');
-        who.textContent = '👉 ' + (assigneeNames.length ? assigneeNames.join('、') : '未指派');
-        meta.appendChild(who);
+        if (canPublish) {
+          const assigneeNames = (Array.isArray(t.assigneeNames) && t.assigneeNames.length) ? t.assigneeNames : (t.assigneeName ? [t.assigneeName] : []);
+          const who = document.createElement('span');
+          who.textContent = '👉 ' + (assigneeNames.length ? assigneeNames.join('、') : '未指派');
+          meta.appendChild(who);
+        }
         if (t.progress && t.progress.total) {
           const pd = document.createElement('span');
           pd.textContent = '✅ ' + t.progress.done + '/' + t.progress.total + ' 人已完成';
@@ -589,8 +594,10 @@
       html += '<div class="kv"><b>发布人</b><span>' + esc(t.creatorName || '—') + '</span></div>';
       html += '<div class="kv"><b>发布时间</b><span>' + fmtTs(t.createdAt) + '</span></div>';
       if (t.dueAt) html += '<div class="kv"><b>截止</b><span>' + fmtTs(t.dueAt) + (t.remindHours ? '（提前 ' + t.remindHours + ' 小时提醒）' : '') + '</span></div>';
-      html += '<div class="kv"><b>发布范围</b><span>' + esc(audLabel(t.audience)) + '</span></div>';
-      html += '<div class="kv"><b>指派给</b><span>' + esc((t.assigneeNames && t.assigneeNames.length) ? t.assigneeNames.join('、') : '未指派') + '</span></div>';
+      if (canPublish) {
+        html += '<div class="kv"><b>发布范围</b><span>' + esc(audLabel(t.audience)) + '</span></div>';
+        html += '<div class="kv"><b>指派给</b><span>' + esc((t.assigneeNames && t.assigneeNames.length) ? t.assigneeNames.join('、') : '未指派') + '</span></div>';
+      }
       html += '</div>';
 
       if (t.fields && t.fields.length) {
@@ -671,6 +678,9 @@
 
     let audMode = 'all';
     function openPublish() {
+      if (!canPublish) return;
+      $('fAudRow').hidden = !canPublish;
+      $('fAssigneesRow').hidden = !canPublish;
       const text = $('newTask').value.trim();
       $('fText').value = text;
       $('fDue').value = ''; $('fRemind').value = '0';
@@ -694,8 +704,8 @@
     function setAudMode(mode) {
       audMode = mode;
       $('fAudSeg').querySelectorAll('.segBtn').forEach((b) => b.classList.toggle('on', b.dataset.aud === mode));
-      $('fAudMembersBox').hidden = mode !== 'members';
-      $('fAudRolesBox').hidden = mode !== 'roles';
+      $('fAudMembersBox').hidden = !canPublish || mode !== 'members';
+      $('fAudRolesBox').hidden = !canPublish || mode !== 'roles';
     }
     function checkedValues(container) {
       return Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.value);
@@ -708,13 +718,13 @@
       const dueAt = $('fDue').value ? new Date($('fDue').value).getTime() : 0;
       if (dueAt && dueAt <= Date.now()) { toast('截止时间要在未来'); return; }
       const remindHours = Number($('fRemind').value) || 0;
-      const assigneeIds = checkedValues($('fAssignees'));
+      const assigneeIds = canPublish ? checkedValues($('fAssignees')) : [];
       let audience = { type: 'all', roles: [], memberIds: [] };
-      if (audMode === 'members') {
+      if (canPublish && audMode === 'members') {
         const ids = checkedValues($('fAudMembers'));
         if (!ids.length) { toast('至少勾选一个可见成员'); return; }
         audience = { type: 'members', memberIds: ids };
-      } else if (audMode === 'roles') {
+      } else if (canPublish && audMode === 'roles') {
         const roles = checkedValues($('fAudRoles'));
         if (!roles.length) { toast('至少勾选一个角色'); return; }
         audience = { type: 'roles', roles };

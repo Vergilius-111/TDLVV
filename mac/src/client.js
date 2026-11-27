@@ -284,17 +284,17 @@ function parseManual(text) {
 }
 
 /**
- * 找主机的顺序：手填地址 → 邀请码查映射（自有中继优先，国内可达） → 同网段广播兜底。
- * 映射放前面：隧道换址后能秒级拿到新地址，不必先空等局域网广播。
+ * 找主机的顺序：手填地址 → 稳定 boardId/邀请码查映射（自有中继优先，国内可达） → 同网段广播兜底。
+ * 邀请码每 10 分钟会换，成员本地存的旧码查不到新地址；所以优先用不会变的 boardId。
  */
-async function resolveHost(code, manual) {
+async function resolveHost(code, manual, fallbackCode) {
   if (manual) {
     const m = parseManual(manual);
     if (m) return { baseUrl: m.baseUrl, via: 'manual', board: '' };
   }
-  const mp = await mapping.read(code);
+  const mp = await mapping.readAny([code, fallbackCode]);
   if (mp && mp.u) return { baseUrl: mp.u, via: 'relay', board: mp.n || '', owner: mp.o || '' };
-  const lan = await discover(code, 1500);
+  const lan = await discover(code || fallbackCode, 1500);
   if (lan) return { baseUrl: `http://${lan.host}:${lan.port}`, via: 'lan', board: lan.board };
   return null;
 }

@@ -1,7 +1,7 @@
 {
   "name": "tdlvv",
   "productName": "TDLVV",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "description": "TDLVV 任务便签 macOS 版 - 多团队共享的桌面待办（截止/提醒/成员角色）",
   "main": "src/main.js",
   "author": "TDLVV",

@@ -18,6 +18,7 @@ const el = {};
   'namePanel','nameAvatar','avatarGrid','nameInput','btnNameOk',
   'teamsPanel','teamsClose','profileAvatar','profileAvatarPick','myNameInput','saveName','themeSeg','fontSeg','langSeg','autoStartChk','notifyTaskChk','notifyDueChk',
   'exportDataBtn','importDataBtn','aiBox','aiCopyBtn','versionText','checkUpdateBtn','relayUrlInput','relaySaveBtn',
+  'updateProxyInput','updateProxySaveBtn','updatePanel','updateVersionLine','updateNotes','updateProgress','updateBarFill','updateProgressText','updateCancel','updateOk',
   'teamCount','teamList','boardNameInput','btnCreate','codeInput','btnJoin','manualHost','teamsErr','nearbyArea','nearbyList',
   'teamFilesPath','teamFilesPick','teamFilesTip',
   'teamPanel','teamClose','teamTitle','teamNameEdit','teamNameInput','teamNameSave','teamMeta','teamFilesBox','teamFilesPathLabel','teamFilesOpen','teamFilesChange','teamFilesNote','inviteBox','codeLine','codeTimer','btnCopy','btnRegen','netBox',
@@ -50,6 +51,9 @@ const deviceSelected = new Map(); // teamId -> memberId
 const deviceLinks = new Map(); // `${teamId}:${key}` -> {url,code,network,base}
 const viewerCodes = new Map(); // teamId -> code
 let deviceKind = 'member'; // 'member' | 'viewer'
+let updateInfo = null; // 当前提示的新版本信息
+let updateState = 'idle'; // idle | downloading | done
+let updateSavedPath = '';
 let deviceCodeTeamId = '';
 let openMemberTeamId = '';
 let openMemberId = '';
@@ -264,7 +268,7 @@ function askConfirm(msg, opts) {
     confirmResolver = (ok) => resolve(withNote ? { ok, note: el.confirmNote.value.trim() } : ok);
   });
 }
-/** 发现新版本时的统一弹窗：确认后打开下载页；无论选什么都记住该版本，避免反复打扰 */
+/** 发现新版本：只显示本次更新要点，点「更新版本」直接在软件内后台下载 */
 async function offerUpdate(info, manual) {
   if (!info || !info.ok) {
     if (manual) toast(trText('检查失败，请稍后重试'));
@@ -274,17 +278,85 @@ async function offerUpdate(info, manual) {
     if (manual) toast(`${trText('已是最新版本')} ${info.current || ''}`);
     return;
   }
-  const notes = info.notes ? `\n\n${info.notes}` : '';
-  const body = `${trText('发现新版本')} ${info.latest}${info.current ? `（${trText('当前版本')} ${info.current}）` : ''}。${trText('是否前往下载页面手动安装？')}${notes}`;
+  updateInfo = info;
+  updateState = 'idle';
+  updateSavedPath = '';
   if (miniMode) setMini(false);
-  const ok = await askConfirm(body, {
-    title: trText('发现新版本'),
-    okText: trText('前往下载'),
-    cancelText: trText('稍后'),
-    defaultOk: true
-  });
+  showUpdatePanel();
   try { await api.markUpdateSeen(info.latest); } catch (e) { /* ignore */ }
-  if (ok && info.url) api.open(info.url);
+}
+
+function showUpdatePanel() {
+  if (!el.updatePanel || !updateInfo) return;
+  const info = updateInfo;
+  if (el.updateVersionLine) {
+    el.updateVersionLine.textContent = `${trText('发现新版本')} ${info.latest || ''}${info.current ? `（${trText('当前版本')} ${info.current}）` : ''}`;
+  }
+  if (el.updateNotes) {
+    el.updateNotes.innerHTML = '';
+    const notes = Array.isArray(info.notes) ? info.notes : String(info.notes || '').split('\n').filter(Boolean);
+    if (!notes.length) notes.push(trText('修复若干问题，提升稳定性'));
+    notes.slice(0, 6).forEach((line) => {
+      const li = document.createElement('li');
+      li.textContent = String(line).replace(/^[-*]\s+/, '');
+      el.updateNotes.appendChild(li);
+    });
+  }
+  el.updatePanel.classList.remove('hidden');
+  setUpdateUi('idle', 0, 0, 0);
+}
+
+function setUpdateUi(state, percent, received, total) {
+  updateState = state;
+  if (el.updateProgress) el.updateProgress.classList.toggle('hidden', state === 'idle' && !updateSavedPath);
+  if (el.updateBarFill) el.updateBarFill.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
+  if (el.updateProgressText) {
+    if (state === 'done') el.updateProgressText.textContent = trText('下载完成，点击安装');
+    else if (state === 'downloading') {
+      const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+      el.updateProgressText.textContent = total
+        ? `${pct}%  ${fmtBytes(received)} / ${fmtBytes(total)}`
+        : `${pct}%  ${fmtBytes(received)}`;
+    } else el.updateProgressText.textContent = '';
+  }
+  if (el.updateOk) {
+    if (state === 'done') el.updateOk.textContent = trText('立即安装');
+    else if (state === 'downloading') el.updateOk.textContent = trText('取消下载');
+    else el.updateOk.textContent = trText('更新版本');
+    el.updateOk.disabled = !!(state === 'idle' && !(updateInfo && updateInfo.asset));
+  }
+}
+
+function closeUpdatePanel() {
+  if (el.updatePanel) el.updatePanel.classList.add('hidden');
+}
+
+async function startUpdateDownload() {
+  if (!updateInfo || !updateInfo.asset) return;
+  if (updateState === 'done' && updateSavedPath) {
+    try { await api.openPath(updateSavedPath); } catch (e) { toast(trText('打开安装包失败')); }
+    return;
+  }
+  if (updateState === 'downloading') {
+    try { await api.cancelUpdateDownload(); } catch (e) { /* ignore */ }
+    setUpdateUi('idle', 0, 0, 0);
+    return;
+  }
+  setUpdateUi('downloading', 0, 0, updateInfo.asset.size || 0);
+  try {
+    const r = await api.downloadUpdate({
+      url: updateInfo.asset.url,
+      name: updateInfo.asset.name,
+      proxy: S && S.updateProxy ? S.updateProxy : ''
+    });
+    if (!r || !r.ok) {
+      setUpdateUi('idle', 0, 0, 0);
+      toast((r && r.error) || trText('下载失败'));
+    }
+  } catch (e) {
+    setUpdateUi('idle', 0, 0, 0);
+    toast(trText('下载失败'));
+  }
 }
 function focusComposer() {
   if (!el.newTask || miniMode) return;
@@ -1415,6 +1487,7 @@ function render() {
   if (el.notifyDueChk) el.notifyDueChk.checked = S.notifyDue !== false;
   if (el.versionText) el.versionText.textContent = `${trText('当前版本')} ${S.version || ''}`;
   if (el.relayUrlInput && document.activeElement !== el.relayUrlInput) el.relayUrlInput.value = S.relayUrl || '';
+  if (el.updateProxyInput && document.activeElement !== el.updateProxyInput) el.updateProxyInput.value = S.updateProxy || '';
   renderPortalBox();
   renderAiBox();
   reportMemberStats();
@@ -2131,11 +2204,11 @@ function taskRow(team, t, members) {
   if (iconCol.childNodes.length) row.appendChild(iconCol);
 
   // 任务右侧操作区：上 2 下 2，指派只显示手指图标
-  // 指派只属于团队任务，且只有创建者/管理员/任务发起人能改；个人清单里没有指派按钮
+  // 指派只属于团队任务，且只有创建者/管理员能改；个人清单和普通成员都看不到
   const actions = document.createElement('div');
   actions.className = 'taskActions';
 
-  if (team.kind !== 'local' && (canManage(team) || taskCreator(team, t))) {
+  if (team.kind !== 'local' && canManage(team)) {
     const ids = assigneeIdsOf(t);
     const names = ids.map((id) => members.find((m) => m.id === id)).filter(Boolean).map(nameOf);
     const chip = document.createElement('button');
@@ -3365,8 +3438,8 @@ function openMenu(teamId, id, anchor) {
   const team = teamById(teamId);
   const t = taskById(team, id);
   if (!team || team.kind === 'local' || !t) return;
-  if (!canManage(team) && !taskCreator(team, t)) {
-    toast('只有任务发起人或管理员能指派任务');
+  if (!canManage(team)) {
+    toast('只有创建者或管理员能指派任务');
     return;
   }
   closeMenu();
@@ -3748,7 +3821,39 @@ function bind() {
       el.checkUpdateBtn.textContent = original;
     }
   };
+  if (el.updateProxySaveBtn) el.updateProxySaveBtn.onclick = async () => {
+    const url = (el.updateProxyInput && el.updateProxyInput.value || '').trim();
+    try {
+      const r = await api.setUpdateProxy(url);
+      S.updateProxy = r && r.updateProxy ? r.updateProxy : '';
+      toast(trText('已保存'));
+    } catch (e) {
+      toast(trText('保存失败'));
+    }
+  };
+  if (el.updateOk) el.updateOk.onclick = startUpdateDownload;
+  if (el.updateCancel) el.updateCancel.onclick = async () => {
+    if (updateState === 'downloading') {
+      try { await api.cancelUpdateDownload(); } catch (e) { /* ignore */ }
+      setUpdateUi('idle', 0, 0, 0);
+    }
+    closeUpdatePanel();
+  };
   if (api.onUpdateAvailable) api.onUpdateAvailable((info) => offerUpdate(info, false));
+  if (api.onUpdateProgress) api.onUpdateProgress((p) => {
+    if (el.updatePanel.classList.contains('hidden')) return;
+    setUpdateUi('downloading', p.percent || 0, p.received || 0, p.total || 0);
+  });
+  if (api.onUpdateDone) api.onUpdateDone((p) => {
+    updateSavedPath = p && p.path ? p.path : '';
+    setUpdateUi('done', 100, p.size || 0, p.size || 0);
+    toast(trText('更新包已下载完成'));
+  });
+  if (api.onUpdateError) api.onUpdateError((p) => {
+    if (p && p.cancelled) return;
+    setUpdateUi('idle', 0, 0, 0);
+    toast((p && p.error) || trText('下载失败'));
+  });
 
   el.exportDataBtn.onclick = async () => {
     if (el.exportDataBtn.disabled) return;

@@ -351,6 +351,7 @@ function startHost(opts) {
       members: (state.members || []).map(memberView),
       tasks,
       canPublish: !viewer && store.isManager(member.role),
+      canManage: !viewer && store.isManager(member.role),
       templates: (state.templates || []).map((x) => ({ id: x.id, name: x.name, fields: x.fields || [] }))
     };
   }

@@ -514,9 +514,9 @@ function apply(state, action, actorId) {
         t.text = text;
       }
       if (Array.isArray(action.assigneeIds) || typeof action.assigneeId === 'string') {
-        // 个人清单没有指派；团队指派只有任务发起人或管理员能做，且对象必须能看到这条任务
+        // 个人清单没有指派；团队指派只有创建者或管理员能做，且对象必须能看到这条任务
         if (state.kind !== 'local') {
-          requireTaskEditor(state, t, actorId, '只有任务发起人或管理员能指派任务');
+          requireManager(state, actorId, '只有创建者或管理员能指派任务');
           const raw = Array.isArray(action.assigneeIds)
             ? action.assigneeIds
             : (action.assigneeId ? [action.assigneeId] : []);

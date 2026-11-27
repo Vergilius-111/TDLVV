@@ -5,7 +5,7 @@
 const http = require('http');
 const https = require('https');
 
-const NTFY_BASE = 'https://ntfy.sh';
+const NTFY_BASE = String(process.env.TDLVV_NTFY_BASE || 'https://ntfy.sh').replace(/\/+$/, '');
 const PREFIX = 'tnx-';
 
 // 运行时由主进程注入：用户配置的自有中继根地址（如 https://relay.example.com）
@@ -58,21 +58,28 @@ function requestJson(fullUrl, method, body, timeout = 8000) {
   });
 }
 
-/** 主机发布自己的公网地址，30 分钟后过期，由主机定时续期 */
+/**
+ * 主机发布自己的公网地址，30 分钟后过期，由主机定时续期。
+ * code 可以传数组：除了邀请码，还会用稳定的 boardId 再发一份。
+ * 邀请码每 10 分钟自动更换，成员本地保存的是旧码；用 boardId 查地址才不会在隧道换址后失联。
+ */
 async function publish(code, data) {
+  const codes = [...new Set((Array.isArray(code) ? code : [code]).filter(Boolean).map(String))];
+  if (!codes.length) return false;
   const payload = { ...data, ts: Date.now() };
   const jobs = [];
 
-  // 1) ntfy.sh（原路径，保证老成员仍能读到）
-  jobs.push(
-    requestJson(`${NTFY_BASE}/${topicFor(code)}`, 'POST', payload, 8000).then(() => true, () => false)
-  );
-
-  // 2) 自有中继（配置了才写）
-  if (relayBase) {
+  for (const key of codes) {
+    // ntfy.sh（原路径，保证老成员仍能读到）
     jobs.push(
-      requestJson(`${relayBase}/map`, 'POST', { code, ...payload }, 8000).then(() => true, () => false)
+      requestJson(`${NTFY_BASE}/${topicFor(key)}`, 'POST', payload, 8000).then(() => true, () => false)
     );
+    // 自有中继（配置了才写）
+    if (relayBase) {
+      jobs.push(
+        requestJson(`${relayBase}/map`, 'POST', { code: key, ...payload }, 8000).then(() => true, () => false)
+      );
+    }
   }
 
   const results = await Promise.all(jobs);
@@ -89,20 +96,18 @@ function decodeMessage(raw) {
   return data && typeof data === 'object' ? data : null;
 }
 
-/** 加入方按邀请码查最新地址；找不到返回 null */
-async function read(code) {
-  // 1) 优先自有中继：精确 GET 当前值，比 ntfy 历史消息更快更可靠
-  if (relayBase) {
-    try {
-      const raw = await requestJson(`${relayBase}/map?code=${encodeURIComponent(code)}`, 'GET', null, 8000);
-      const data = decodeMessage(raw);
-      if (data && data.u) return data;
-    } catch (e) {
-      /* 中继失败，回退 ntfy */
-    }
+async function readRelay(code) {
+  if (!relayBase) return null;
+  try {
+    const raw = await requestJson(`${relayBase}/map?code=${encodeURIComponent(code)}`, 'GET', null, 8000);
+    const data = decodeMessage(raw);
+    return data && data.u ? data : null;
+  } catch (e) {
+    return null;
   }
+}
 
-  // 2) ntfy.sh 回退
+async function readNtfy(code) {
   try {
     const raw = await requestJson(
       `${NTFY_BASE}/${topicFor(code)}/json?poll=1&since=12h`,
@@ -128,4 +133,22 @@ async function read(code) {
   }
 }
 
-module.exports = { publish, read, topicFor, setRelayUrl, getRelayUrl, BASE: NTFY_BASE };
+/** 按多个 key 查最新地址：先并行查中继，再并行回退 ntfy；返回第一个命中的 */
+async function readAny(codes) {
+  const keys = [...new Set((Array.isArray(codes) ? codes : [codes]).filter(Boolean).map(String))];
+  if (!keys.length) return null;
+
+  const relayHits = await Promise.all(keys.map(readRelay));
+  const relayHit = relayHits.find((d) => d && d.u);
+  if (relayHit) return relayHit;
+
+  const ntfyHits = await Promise.all(keys.map(readNtfy));
+  return ntfyHits.find((d) => d && d.u) || null;
+}
+
+/** 加入方按邀请码查最新地址；找不到返回 null */
+async function read(code) {
+  return readAny([code]);
+}
+
+module.exports = { publish, read, readAny, topicFor, setRelayUrl, getRelayUrl, BASE: NTFY_BASE };

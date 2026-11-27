@@ -260,7 +260,14 @@
         <span class="tips" id="versionText" data-no-i18n>当前版本 —</span>
         <button class="secondary" id="checkUpdateBtn">检查更新</button>
       </div>
-      <p class="tips">检查到新版本会提示你前往 GitHub 下载安装包，手动下载安装；不会自动下载或覆盖现有数据。</p>
+      <label class="backupRow">
+        <span>下载加速前缀（可选，留空直连 GitHub）</span>
+        <input id="updateProxyInput" placeholder="https://your-proxy.example/" autocomplete="off" spellcheck="false" data-no-i18n />
+      </label>
+      <div class="backupRow">
+        <button class="secondary" id="updateProxySaveBtn">保存加速地址</button>
+      </div>
+      <p class="tips">发现新版本后直接在软件内下载对应系统的安装包，并显示下载进度；下载完成后点「立即安装」即可。加速前缀只在下载慢时需要填写。</p>
 
       <div class="settingsDivider"></div>
 
@@ -613,6 +620,23 @@
       <div class="rowBtns confirmBtns">
         <button class="ghost" id="confirmCancel">取消</button>
         <button class="primary" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 发现新版本：只列本次更新要点，直接在 App 内下载 -->
+  <div class="overlay hidden" id="updatePanel">
+    <div class="card updateCard">
+      <h2 id="updateTitle">发现新版本</h2>
+      <p class="tips" id="updateVersionLine" data-no-i18n></p>
+      <ul class="updateNotes" id="updateNotes"></ul>
+      <div class="updateProgress hidden" id="updateProgress">
+        <div class="updateBar"><i id="updateBarFill"></i></div>
+        <span id="updateProgressText" data-no-i18n>0%</span>
+      </div>
+      <div class="rowBtns confirmBtns">
+        <button class="ghost" id="updateCancel">取消</button>
+        <button class="primary" id="updateOk">更新版本</button>
       </div>
     </div>
   </div>

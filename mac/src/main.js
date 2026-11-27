@@ -102,6 +102,7 @@ const ctx = {
   aiInstall: false,
   aiGreeted: false,
   updateSeen: '', // 已经提示过的新版本号，避免每次启动反复弹窗
+  updateProxy: '', // 可选的下载加速前缀，空则直连 GitHub
   relayUrl: '', // 自有地址中继服务根地址，空则用 ntfy.sh
   portalCode: '' // 主页设备码：一个码看到「我」的全部团队，以本人身份操作
 };
@@ -275,6 +276,7 @@ function prefsPayload() {
     aiInstall: !!ctx.aiInstall,
     aiGreeted: !!ctx.aiGreeted,
     updateSeen: ctx.updateSeen || '',
+    updateProxy: ctx.updateProxy || '',
     relayUrl: ctx.relayUrl || '',
     portalCode: ctx.portalCode || ''
   };
@@ -411,6 +413,7 @@ function applyPrefs(prefs) {
   ctx.aiInstall = !!p.aiInstall;
   ctx.aiGreeted = !!p.aiGreeted;
   ctx.updateSeen = String(p.updateSeen || '');
+  ctx.updateProxy = String(p.updateProxy || '').trim().replace(/\/+$/, '');
   ctx.relayUrl = String(p.relayUrl || '');
   ctx.portalCode = String(p.portalCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
   mapping.setRelayUrl(ctx.relayUrl);
@@ -901,7 +904,9 @@ function startTunnel(t) {
 async function publishMapping(t) {
   if (t.kind !== 'host' || !t.state || !t.tunnelUrl) return;
   try {
-    await mapping.publish(t.state.inviteCode, {
+    // 邀请码每 10 分钟自动更换，成员本地存的旧码会查不到新地址；
+    // 因此同时用稳定的 boardId 发布一份，成员重连时优先按 boardId 找。
+    await mapping.publish([t.state.boardId, t.state.inviteCode].filter(Boolean), {
       u: t.tunnelUrl,
       n: t.state.boardName,
       o: store.displayName(t.state.members[0])
@@ -938,6 +943,7 @@ async function refreshTeam(t) {
       t.online = true;
       t.error = '';
       t.failCount = 0;
+      t.firstFailAt = 0;
       t.wasOnline = true;
       if (Array.isArray(t.seenTaskIds)) {
         if (cameOnline) push();
@@ -959,6 +965,7 @@ async function refreshTeam(t) {
       t.online = true;
       t.error = '';
       t.failCount = 0;
+      t.firstFailAt = 0;
       const me = state.members.find((m) => m.id === t.meId);
       if (!me) t.error = '你已被移出这个团队';
       if (state.rev !== prevRev || firstSync) {
@@ -971,27 +978,37 @@ async function refreshTeam(t) {
     }
   } catch (e) {
     t.failCount = (t.failCount || 0) + 1;
+    const now = Date.now();
+    if (!t.firstFailAt) t.firstFailAt = now;
     if (e.statusCode === 401) {
       t.online = false;
       t.wasOnline = false;
+      t.firstFailAt = 0;
       t.error = '已被移出团队，或团队重置了邀请码';
       push();
-    } else if (t.online) {
+    } else if (t.online && now - t.firstFailAt >= 12000) {
+      // 给短暂网络抖动 12 秒宽限期，避免频繁闪成“连不上创建者”
       t.online = false;
       t.wasOnline = false;
       t.error = '连不上创建者，正在重连…';
       push();
     }
-    // 每失败 2 次（约 3 秒）就重新解析地址：隧道换址后成员秒级追上新地址
-    if (t.failCount % 2 === 0 && t.code) {
-      try {
-        const found = await resolveHost(t.code, '');
-        if (found && found.baseUrl !== t.baseUrl) {
-          t.baseUrl = found.baseUrl;
-          saveTeams();
+    // 每失败 2 次重新解析地址；用 stable boardId 优先，旧邀请码兜底。
+    // 5 秒节流，避免 ntfy/中继被高频查询拖慢。
+    if (t.failCount % 2 === 0 && now - (t.lastResolveAt || 0) >= 5000) {
+      const stableId = t.boardId || (t.state && t.state.boardId) || '';
+      if (stableId || t.code) {
+        t.lastResolveAt = now;
+        try {
+          const found = await resolveHost(stableId || t.code, '', stableId ? t.code : '');
+          if (found && found.baseUrl !== t.baseUrl) {
+            t.baseUrl = found.baseUrl;
+            t.firstFailAt = 0;
+            saveTeams();
+          }
+        } catch (err) {
+          /* ignore */
         }
-      } catch (err) {
-        /* ignore */
       }
     }
   } finally {
@@ -1043,6 +1060,7 @@ async function checkJoinStatus() {
         name: s.state.boardName,
         meId: s.me.id,
         code: p.code,
+        boardId: s.state.boardId || '',
         baseUrl: p.baseUrl,
         token: s.token,
         state: s.state,
@@ -1133,6 +1151,7 @@ function view() {
     taskFilesRoot,
     version: app.getVersion(),
     relayUrl: ctx.relayUrl || '',
+    updateProxy: ctx.updateProxy || '',
     portal: {
       code: ctx.portalCode || '',
       link: portalLink(),
@@ -1146,11 +1165,11 @@ function push() {
   if (win && !win.isDestroyed()) win.webContents.send('state', view());
 }
 
-/* ---------------- 检查更新（只提示、不自动下载安装） ---------------- */
+/* ---------------- 检查更新（提示后在应用内后台下载安装包） ---------------- */
 let updateTimer = null;
 async function autoCheckUpdate() {
   if (SHOT) return;
-  const info = await updater.check(app.getVersion());
+  const info = await updater.check(app.getVersion(), process.platform, process.arch);
   // 网络失败或已是最新：静默，不打扰用户
   if (!info.ok || !info.available) return;
   // 这个新版本已经提示过一次就不再弹（用户可在设置里手动再查）
@@ -1161,6 +1180,45 @@ function startUpdateCheck() {
   setTimeout(autoCheckUpdate, 6000); // 启动后延迟，别和初始化抢资源
   if (updateTimer) clearInterval(updateTimer);
   updateTimer = setInterval(autoCheckUpdate, 30 * 60 * 1000); // 常驻时每 30 分钟复查
+}
+
+let updateDownloadTask = null;
+function emitUpdate(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload || {});
+}
+function beginUpdateDownload(payload) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const url = String(p.url || '');
+  const name = String(p.name || 'TDLVV-update').replace(/[\\/:*?"<>|]/g, '_');
+  if (!/^https?:\/\//i.test(url)) return { ok: false, error: '下载地址无效' };
+  if (updateDownloadTask) {
+    try { updateDownloadTask.cancel(); } catch (e) { /* ignore */ }
+    updateDownloadTask = null;
+  }
+  const dest = path.join(app.getPath('downloads'), name);
+  emitUpdate('update:progress', { percent: 0, received: 0, total: 0, state: 'downloading' });
+  updateDownloadTask = updater.startDownload({
+    url,
+    dest,
+    proxy: p.proxy || ctx.updateProxy || '',
+    onProgress: (v) => emitUpdate('update:progress', Object.assign({ state: 'downloading' }, v))
+  });
+  updateDownloadTask.promise.then((r) => {
+    updateDownloadTask = null;
+    if (r && r.ok) emitUpdate('update:done', { path: r.path, name, size: r.size });
+    else emitUpdate('update:error', { error: (r && r.error) || '下载失败' });
+  }).catch((e) => {
+    const cancelled = !!(e && e.cancelled);
+    updateDownloadTask = null;
+    emitUpdate('update:error', { error: cancelled ? 'cancelled' : String((e && e.message) || e), cancelled });
+  });
+  return { ok: true, dest };
+}
+function cancelUpdateDownload() {
+  if (!updateDownloadTask) return false;
+  try { updateDownloadTask.cancel(); } catch (e) { /* ignore */ }
+  updateDownloadTask = null;
+  return true;
 }
 
 function setError(msg) {
@@ -2931,11 +2989,18 @@ function registerIpc() {
     }
     return { ok: true, relayUrl: ctx.relayUrl };
   });
-  ipcMain.handle('update:check', () => updater.check(app.getVersion()));
+  ipcMain.handle('update:check', () => updater.check(app.getVersion(), process.platform, process.arch));
   ipcMain.handle('update:seen', (e, version) => {
     ctx.updateSeen = String(version || '');
     savePrefs();
     return true;
+  });
+  ipcMain.handle('update:download', (e, payload) => beginUpdateDownload(payload));
+  ipcMain.handle('update:downloadCancel', () => cancelUpdateDownload());
+  ipcMain.handle('update:proxy/set', (e, url) => {
+    ctx.updateProxy = String(url || '').trim().replace(/\/+$/, '');
+    savePrefs();
+    return { ok: true, updateProxy: ctx.updateProxy };
   });
   ipcMain.handle('app:autostart', (e, on) => setAutoStart(on));
   ipcMain.handle('notify:set', (e, data) => {

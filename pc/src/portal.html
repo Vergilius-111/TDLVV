@@ -99,10 +99,13 @@
     .doneToggle:disabled { opacity: 0.5; }
     .formRow { margin-bottom: 12px; }
     .formRow > label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 5px; font-weight: 600; }
-    .formInput { width: 100%; min-height: 42px; border: 1px solid var(--edge); border-radius: 10px; background: rgba(255,255,255,0.7); padding: 9px 11px; color: var(--ink); outline: none; }
+    .formInput { width: 100%; min-width: 0; max-width: 100%; min-height: 42px; border: 1px solid var(--edge); border-radius: 10px; background: rgba(255,255,255,0.7); padding: 9px 11px; color: var(--ink); outline: none; }
     .formInput:focus { border-color: var(--accent); }
     textarea.formInput { min-height: 84px; resize: vertical; line-height: 1.5; }
-    .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .formGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+    .formGrid > * { min-width: 0; }
+    .formGrid.dateGrid { grid-template-columns: minmax(0, 1fr); }
+    .formGrid.dateGrid input[type="datetime-local"].formInput { width: 100%; min-width: 0; }
     .checkList { max-height: 168px; overflow-y: auto; border: 1px solid var(--edge); border-radius: 10px; background: rgba(255,255,255,0.6); padding: 4px 8px; }
     .checkItem { display: flex; align-items: center; gap: 8px; padding: 7px 2px; font-size: 14px; border-bottom: 1px dashed rgba(120,100,30,0.12); }
     .checkItem:last-child { border-bottom: 0; }
@@ -168,18 +171,18 @@
     <div class="sheet" id="publishSheet">
       <div class="sheetHead"><b>发布任务</b><button class="closeBtn" id="publishClose" aria-label="关闭">×</button></div>
       <div class="formRow"><label for="fText">任务内容</label><textarea class="formInput" id="fText" maxlength="500" placeholder="这条任务要做什么？"></textarea></div>
-      <div class="formGrid">
+      <div class="formGrid dateGrid">
         <div class="formRow"><label for="fDue">截止时间</label><input class="formInput" type="datetime-local" id="fDue" /></div>
         <div class="formRow"><label for="fRemind">提前提醒</label><select class="formInput" id="fRemind">
           <option value="0">不提醒</option><option value="1">提前 1 小时</option><option value="3">提前 3 小时</option><option value="6">提前 6 小时</option><option value="12">提前 12 小时</option><option value="24">提前 1 天</option><option value="48">提前 2 天</option>
         </select></div>
       </div>
-      <div class="formRow"><label>发布范围</label><div class="segBtns" id="fAudSeg">
+      <div class="formRow adminOnly" id="fAudRow"><label>发布范围</label><div class="segBtns" id="fAudSeg">
         <button class="segBtn on" data-aud="all">👥 全员</button><button class="segBtn" data-aud="members">部分成员</button><button class="segBtn" data-aud="roles">按角色</button>
       </div></div>
-      <div class="formRow" id="fAudMembersBox" hidden><label>可见成员（勾选）</label><div class="checkList" id="fAudMembers"></div></div>
-      <div class="formRow" id="fAudRolesBox" hidden><label>可见角色（勾选）</label><div class="checkList" id="fAudRoles"></div></div>
-      <div class="formRow"><label>指派给（可多选，决定「几人已完成」的分母）</label><div class="checkList" id="fAssignees"></div></div>
+      <div class="formRow adminOnly" id="fAudMembersBox" hidden><label>可见成员（勾选）</label><div class="checkList" id="fAudMembers"></div></div>
+      <div class="formRow adminOnly" id="fAudRolesBox" hidden><label>可见角色（勾选）</label><div class="checkList" id="fAudRoles"></div></div>
+      <div class="formRow adminOnly" id="fAssigneesRow"><label>指派给（可多选，决定「几人已完成」的分母）</label><div class="checkList" id="fAssignees"></div></div>
       <div class="formRow"><label>任务链接（可选）</label><div class="formGrid">
         <select class="formInput" id="fLinkType"><option value="">无</option><option value="url">网页链接</option></select>
         <input class="formInput" id="fLinkTarget" placeholder="https://…" />
@@ -204,6 +207,14 @@
     let stateData = null;
     let currentTeamId = '';
     let detailId = '';
+
+    /** 发布范围/指派只属于团队里的创建者或管理员；个人清单不显示 */
+    function isTeamAdmin(team) {
+      if (!team || team.kind === 'local') return false;
+      if (typeof team.canManage === 'boolean') return team.canManage;
+      const meRole = team.me && team.me.role;
+      return team.role === 'owner' || team.role === 'admin' || meRole === 'owner' || meRole === 'admin';
+    }
 
     function toast(text) {
       const node = $('toast');
@@ -324,8 +335,10 @@
           const due = document.createElement('span'); due.className = 'due' + (t.dueAt <= Date.now() && !t.done ? ' overdue' : '');
           due.textContent = '🕒 ' + fmtDue(t.dueAt); meta.appendChild(due);
         }
-        const names = (Array.isArray(t.assigneeNames) && t.assigneeNames.length) ? t.assigneeNames : (t.assigneeName ? [t.assigneeName] : []);
-        const who = document.createElement('span'); who.textContent = '👉 ' + (names.length ? names.join('、') : '未指派'); meta.appendChild(who);
+        if (isTeamAdmin(team)) {
+          const names = (Array.isArray(t.assigneeNames) && t.assigneeNames.length) ? t.assigneeNames : (t.assigneeName ? [t.assigneeName] : []);
+          const who = document.createElement('span'); who.textContent = '👉 ' + (names.length ? names.join('、') : '未指派'); meta.appendChild(who);
+        }
         if (t.progress && t.progress.total) {
           const pd = document.createElement('span'); pd.textContent = '✅ ' + t.progress.done + '/' + t.progress.total + ' 人已完成';
           if (t.progress.done >= t.progress.total) pd.className = 'myDone'; meta.appendChild(pd);
@@ -378,8 +391,10 @@
       html += '<div class="kv"><b>发布人</b><span>' + esc(t.creatorName || '—') + '</span></div>';
       html += '<div class="kv"><b>发布时间</b><span>' + fmtTs(t.createdAt) + '</span></div>';
       if (t.dueAt) html += '<div class="kv"><b>截止</b><span>' + fmtTs(t.dueAt) + (t.remindHours ? '（提前 '+t.remindHours+' 小时提醒）' : '') + '</span></div>';
-      html += '<div class="kv"><b>发布范围</b><span>' + esc(audLabel(t.audience)) + '</span></div>';
-      html += '<div class="kv"><b>指派给</b><span>' + esc((t.assigneeNames && t.assigneeNames.length) ? t.assigneeNames.join('、') : '未指派') + '</span></div>';
+      if (isTeamAdmin(currentTeam())) {
+        html += '<div class="kv"><b>发布范围</b><span>' + esc(audLabel(t.audience)) + '</span></div>';
+        html += '<div class="kv"><b>指派给</b><span>' + esc((t.assigneeNames && t.assigneeNames.length) ? t.assigneeNames.join('、') : '未指派') + '</span></div>';
+      }
       html += '</div>';
       if (t.fields && t.fields.length) {
         html += '<div class="detailSec"><h4>附加字段</h4>';
@@ -444,6 +459,9 @@
     let audMode = 'all';
     function openPublish() {
       const team = currentTeam(); if (!team || !team.canPublish) return;
+      const admin = isTeamAdmin(team);
+      $('fAudRow').hidden = !admin;
+      $('fAssigneesRow').hidden = !admin;
       const text = $('newTask').value.trim();
       $('fText').value = text; $('fDue').value=''; $('fRemind').value='0'; $('fLinkType').value=''; $('fLinkTarget').value=''; $('fFile').value='';
       $('fFields').innerHTML=''; addFieldRow('', '');
@@ -460,7 +478,8 @@
     function setAudMode(mode) {
       audMode = mode;
       $('fAudSeg').querySelectorAll('.segBtn').forEach((b) => b.classList.toggle('on', b.dataset.aud === mode));
-      $('fAudMembersBox').hidden = mode !== 'members'; $('fAudRolesBox').hidden = mode !== 'roles';
+      const admin = isTeamAdmin(currentTeam());
+      $('fAudMembersBox').hidden = !admin || mode !== 'members'; $('fAudRolesBox').hidden = !admin || mode !== 'roles';
     }
     function checkedValues(container) { return Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.value); }
     async function publishFull() {
@@ -469,10 +488,11 @@
       const dueAt = $('fDue').value ? new Date($('fDue').value).getTime() : 0;
       if (dueAt && dueAt <= Date.now()) { toast('截止时间要在未来'); return; }
       const remindHours = Number($('fRemind').value) || 0;
-      const assigneeIds = checkedValues($('fAssignees'));
+      const admin = isTeamAdmin(currentTeam());
+      const assigneeIds = admin ? checkedValues($('fAssignees')) : [];
       let audience = { type: 'all', roles: [], memberIds: [] };
-      if (audMode === 'members') { const ids = checkedValues($('fAudMembers')); if (!ids.length) { toast('至少勾选一个可见成员'); return; } audience = { type:'members', memberIds: ids }; }
-      else if (audMode === 'roles') { const roles = checkedValues($('fAudRoles')); if (!roles.length) { toast('至少勾选一个角色'); return; } audience = { type:'roles', roles }; }
+      if (admin && audMode === 'members') { const ids = checkedValues($('fAudMembers')); if (!ids.length) { toast('至少勾选一个可见成员'); return; } audience = { type:'members', memberIds: ids }; }
+      else if (admin && audMode === 'roles') { const roles = checkedValues($('fAudRoles')); if (!roles.length) { toast('至少勾选一个角色'); return; } audience = { type:'roles', roles }; }
       const linkType = $('fLinkType').value; const linkTarget = $('fLinkTarget').value.trim();
       if (linkType === 'url' && !linkTarget) { toast('填了网页链接类型就要填网址'); return; }
       const fields = Array.from($('fFields').querySelectorAll('.fieldRow')).map((row) => {
