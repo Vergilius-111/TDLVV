@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const store = require('./store');
+const fileStore = require('./files');
 
 const BEACON_PORT = 41234;
 const REQ_TTL = 10 * 60 * 1000; // 审批结果保留 10 分钟，够客户端轮询到
@@ -97,6 +98,8 @@ function sendMobilePage(res) {
  * @param {object} opts.tokens         持久化的 token -> memberId
  * @param {object} opts.deviceCodes    持久化的 memberId -> 固定设备码
  * @param {function} opts.onDeviceCodes 设备码变化回调（落盘）
+ * @param {string} opts.viewerCode     持久化的查看者设备码（只读身份）
+ * @param {function} opts.onViewerCode 查看者设备码变化回调（落盘）
  * @param {object} opts.files          任务文件存储（src/files.js 的 createStore 实例）
  * @param {function} opts.onChange     状态变化回调（落盘 + 刷新界面）
  * @param {function} opts.onTokens     令牌变化回调（落盘）
@@ -104,10 +107,33 @@ function sendMobilePage(res) {
 function startHost(opts) {
   const state = opts.state;
   const files = opts.files;
-  const tokens = new Map(Object.entries(opts.tokens || {})); // token -> memberId
+
+  function mirrorMemberFile(task, meta) {
+    if (!task || !meta || !meta.storedRel || !files || !files.root) return;
+    const wanted = task.folderRel || fileStore.taskFolderRel(state.boardId, task.text, task.id);
+    const rel = fileStore.ensureTaskFolder(files.root, wanted, task.id);
+    if (rel) task.folderRel = rel;
+    const src = files.resolve(meta.storedRel, meta.root);
+    if (!src || !fs.existsSync(src)) return;
+    const dst = path.join(files.root, task.folderRel, fileStore.safeName(meta.displayName || '任务文件'));
+    try {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(src, dst);
+    } catch (e) { /* ignore */ }
+  }
+  const tokens = new Map(Object.entries(opts.tokens || {})); // token -> memberId（查看者用特殊前缀）
   const results = new Map(); // requestId -> {status, token, memberId, at}
   const lastSeenAt = new Map();
   const memberCodes = new Map(Object.entries(opts.deviceCodes || {}).filter(([, code]) => typeof code === 'string' && code));
+  const VIEWER_ID = '__viewer__'; // 查看者的虚拟成员 id（只读，不在 members 列表里）
+  let viewerCode = String(opts.viewerCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+
+  function isViewer(member) {
+    return !!member && member.id === VIEWER_ID;
+  }
+  function viewerMember() {
+    return { id: VIEWER_ID, name: '查看者', avatar: '👀', role: 'viewer', online: true };
+  }
 
   function persistTokens() {
     if (typeof opts.onTokens === 'function') {
@@ -132,8 +158,28 @@ function startHost(opts) {
     let code = '';
     do {
       code = store.makeInviteCode();
-    } while ([...memberCodes.values()].includes(code));
+    } while ([...memberCodes.values()].includes(code) || code === viewerCode);
     return code;
+  }
+  function ensureViewerCode() {
+    if (viewerCode) return viewerCode;
+    viewerCode = makeUniqueCode();
+    if (typeof opts.onViewerCode === 'function') opts.onViewerCode(viewerCode);
+    return viewerCode;
+  }
+  function setViewerCode(rawCode) {
+    const code = String(rawCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+    if (code.length !== 6) return { ok: false, error: '设备码要 6 位数字或字母' };
+    if ([...memberCodes.values()].includes(code)) return { ok: false, error: '这个设备码已经被成员使用' };
+    viewerCode = code;
+    if (typeof opts.onViewerCode === 'function') opts.onViewerCode(viewerCode);
+    return { ok: true, code };
+  }
+  function resetViewerCode() {
+    const code = makeUniqueCode();
+    viewerCode = code;
+    if (typeof opts.onViewerCode === 'function') opts.onViewerCode(viewerCode);
+    return { ok: true, code };
   }
   function ensureDeviceCode(memberId) {
     const member = state.members.find((m) => m.id === memberId);
@@ -153,6 +199,7 @@ function startHost(opts) {
     for (const [otherId, saved] of memberCodes) {
       if (saved === code && otherId !== memberId) return { ok: false, error: '这个设备码已经被其他成员使用' };
     }
+    if (code === viewerCode) return { ok: false, error: '这个设备码已经被查看者使用' };
     memberCodes.set(memberId, code);
     persistCodes();
     return { ok: true, code };
@@ -175,9 +222,28 @@ function startHost(opts) {
       if (now - val.at > REQ_TTL) results.delete(key);
     }
   }
+  // 静默检测成员在群状态：定时把超时未心跳的成员标记为离线并推送。
+  // touch 本身不改 rev、不触发推送，所以这里主动提升 rev 让所有客户端同步。
+  function scanPresence() {
+    if (store.expirePresence(state)) {
+      state.rev = (Number(state.rev) || 0) + 1;
+      changed('presence');
+    }
+  }
+  // 成员心跳：节流刷新 lastSeen；从离线恢复时提升 rev 让界面同步上线状态
+  function heartbeat(memberId, now = Date.now()) {
+    const last = lastSeenAt.get(memberId) || 0;
+    if (now - last <= 5000) return;
+    lastSeenAt.set(memberId, now);
+    if (store.touch(state, memberId)) {
+      state.rev = (Number(state.rev) || 0) + 1;
+      changed('presence');
+    }
+  }
   function memberOf(token) {
     const id = tokens.get(token);
     if (!id) return null;
+    if (id === VIEWER_ID) return viewerMember();
     return state.members.find((m) => m.id === id) || null;
   }
   function roleOf(memberId) {
@@ -192,13 +258,45 @@ function startHost(opts) {
       name: store.displayName(m),
       avatar: m.avatar || '',
       role: m.role || 'member',
-      roleTag: m.roleTag || ''
+      roleTag: m.roleTag || '',
+      online: m.role === 'owner' ? true : !!m.online,
+      lastSeen: Number(m.lastSeen) || 0
     };
   }
 
-  function mobileTaskView(t) {
+  function fileBrief(meta) {
+    if (!meta || !meta.storedRel) return null;
+    return {
+      displayName: meta.displayName || '任务文件',
+      size: Number(meta.size) || 0,
+      version: Number(meta.version) || 1,
+      uploadedByName: meta.uploadedByName || '',
+      uploadedAt: Number(meta.uploadedAt) || 0
+    };
+  }
+
+  function mobileTaskView(t, member) {
     const creator = state.members.find((m) => m.id === t.creatorId);
-    const assignee = state.members.find((m) => m.id === t.assigneeId);
+    const ids = Array.isArray(t.assigneeIds) && t.assigneeIds.length ? t.assigneeIds : (t.assigneeId ? [t.assigneeId] : []);
+    const assignees = ids.map((id) => state.members.find((m) => m.id === id)).filter(Boolean);
+    const me = member ? store.displayName(member) : '';
+    // 个人打勾进度：应完成 = 指派成员（没指派则发布范围内的可见成员）
+    const all = state.members || [];
+    const eligible = ids.length
+      ? all.filter((m) => ids.includes(m.id))
+      : all.filter((m) => store.visibleTo(state, t, m.id));
+    const by = (t.personalDoneBy && typeof t.personalDoneBy === 'object') ? t.personalDoneBy : {};
+    const doneIds = eligible.filter((m) => by[m.id]).map((m) => m.id);
+    // 成员提交的文件：创建者/管理员/查看者看全部，成员只看自己+主文件
+    const canSeeAll = isViewer(member) || store.isManager(member.role) || t.creatorId === member.id;
+    const memberFiles = [];
+    Object.keys(t.memberFiles || {}).forEach((mid) => {
+      if (!canSeeAll && mid !== member.id) return;
+      const brief = fileBrief(t.memberFiles[mid]);
+      if (!brief) return;
+      const m = state.members.find((x) => x.id === mid);
+      memberFiles.push(Object.assign({ memberId: mid, memberName: m ? store.displayName(m) : brief.uploadedByName }, brief));
+    });
     return {
       id: t.id,
       text: t.text,
@@ -207,13 +305,31 @@ function startHost(opts) {
       createdAt: t.createdAt || 0,
       dueAt: t.dueAt || 0,
       remindAt: t.remindAt || 0,
+      remindHours: Number(t.remindHours) || 0,
       doneAt: t.doneAt || 0,
+      doneByName: t.doneByName || '',
+      closedByName: t.closedByName || '',
       creatorId: t.creatorId || '',
       creatorName: creator ? store.displayName(creator) : '',
       assigneeId: t.assigneeId || '',
-      assigneeName: assignee ? store.displayName(assignee) : '',
+      assigneeName: assignees.length ? store.displayName(assignees[0]) : '',
+      assigneeIds: assignees.map((m) => m.id),
+      assigneeNames: assignees.map((m) => store.displayName(m)),
+      audience: t.audience || { type: 'all' },
+      linkType: t.linkType || '',
+      linkTarget: t.linkTarget || '',
       pinned: !!t.pinned,
-      fields: (t.fields || []).map((f) => ({ label: f.label || '', value: f.value || '' }))
+      fields: (t.fields || []).map((f) => ({ label: f.label || '', value: f.value || '' })),
+      file: fileBrief(t.file),
+      pendingFile: fileBrief(t.pendingFile),
+      memberFiles,
+      folderRel: t.folderRel || '',
+      personalDoneBy: by,
+      myDone: !!by[member.id],
+      progress: { done: doneIds.length, total: eligible.length, names: doneIds.map((id) => {
+        const m = state.members.find((x) => x.id === id);
+        return m ? store.displayName(m) : '';
+      }).filter(Boolean) }
     };
   }
 
@@ -221,18 +337,20 @@ function startHost(opts) {
     if (since && Number(state.rev) === since) {
       return { ok: true, unchanged: true, rev: state.rev };
     }
+    const viewer = isViewer(member);
     const tasks = (state.tasks || [])
-      .filter((t) => store.visibleTo(state, t, member.id))
-      .map(mobileTaskView);
+      .filter((t) => viewer || store.visibleTo(state, t, member.id))
+      .map((t) => mobileTaskView(t, member));
     return {
       ok: true,
       rev: state.rev,
       boardId: state.boardId,
       boardName: state.boardName,
       me: memberView(member),
+      viewer,
       members: (state.members || []).map(memberView),
       tasks,
-      canPublish: store.isManager(member.role),
+      canPublish: !viewer && store.isManager(member.role),
       templates: (state.templates || []).map((x) => ({ id: x.id, name: x.name, fields: x.fields || [] }))
     };
   }
@@ -248,9 +366,20 @@ function startHost(opts) {
 
   function loginDevice(rawCode) {
     const code = String(rawCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+    const token = store.rid(24);
+    // 查看者码：只读身份，看得到全部任务和文件
+    if (viewerCode && code === viewerCode) {
+      tokens.set(token, VIEWER_ID);
+      persistTokens();
+      return {
+        ok: true, token, viewer: true,
+        me: memberView(viewerMember()),
+        boardId: state.boardId,
+        boardName: state.boardName
+      };
+    }
     const member = codeOwner(code);
     if (!member) return { ok: false, error: '设备码无效，请让创建者检查或重置' };
-    const token = store.rid(24);
     tokens.set(token, member.id);
     persistTokens();
     return {
@@ -331,12 +460,7 @@ function startHost(opts) {
         const token = req.headers['x-token'] || u.searchParams.get('token');
         const member = memberOf(token);
         if (!member) return send(res, 401, { error: '未加入或已被移除' });
-        const now = Date.now();
-        const last = lastSeenAt.get(member.id) || 0;
-        if (now - last > 5000) {
-          lastSeenAt.set(member.id, now);
-          store.touch(state, member.id);
-        }
+        heartbeat(member.id);
         const since = Number(u.searchParams.get('since') || 0);
         return send(res, 200, mobileStateBody(member, since));
       }
@@ -389,12 +513,7 @@ function startHost(opts) {
         const token = req.headers['x-token'] || u.searchParams.get('token');
         const member = memberOf(token);
         if (!member) return send(res, 401, { error: '未加入或已被移除' });
-        const now = Date.now();
-        const last = lastSeenAt.get(member.id) || 0;
-        if (now - last > 5000) {
-          lastSeenAt.set(member.id, now);
-          store.touch(state, member.id);
-        }
+        heartbeat(member.id);
         const since = Number(u.searchParams.get('since') || 0);
         if (since && Number(state.rev) === since) {
           return send(res, 200, { ok: true, unchanged: true, rev: state.rev });
@@ -407,6 +526,7 @@ function startHost(opts) {
         const token = req.headers['x-token'] || u.searchParams.get('token');
         const member = memberOf(token);
         if (!member) return send(res, 401, { error: '未加入或已被移除' });
+        if (isViewer(member)) return send(res, 403, { error: '查看者不能上传文件' });
         if (!files) return send(res, 500, { error: '主机文件目录未准备好' });
         const taskId = String(u.searchParams.get('task') || '');
         const name = String(u.searchParams.get('name') || '任务文件').slice(0, 160);
@@ -440,7 +560,10 @@ function startHost(opts) {
             uploadedAt: Date.now()
           });
           if (isCreator) store.attachFile(state, task.id, member.id, bumped);
-          else store.attachMemberFile(state, task.id, member.id, bumped);
+          else {
+            store.attachMemberFile(state, task.id, member.id, bumped);
+            mirrorMemberFile(task, bumped);
+          }
           changed(isCreator ? 'file' : 'memberFile');
           return send(res, 200, { ok: true, state: state, file: bumped, changed: true });
         }
@@ -473,6 +596,7 @@ function startHost(opts) {
         const changedNow = isCreator
           ? store.attachFile(state, task.id, member.id, saved)
           : store.attachMemberFile(state, task.id, member.id, saved);
+        if (!isCreator) mirrorMemberFile(task, saved);
         if (changedNow) changed(isCreator ? 'file' : 'memberFile');
         return send(res, 200, { ok: true, state: state, file: saved, changed: changedNow });
       }
@@ -486,8 +610,19 @@ function startHost(opts) {
         const task = store.findTask(state, String(u.searchParams.get('task') || ''));
         if (!task) return send(res, 404, { error: '任务不存在' });
         if (!store.visibleTo(state, task, member.id)) return send(res, 403, { error: '你看不到这条任务' });
+        const wantMember = String(u.searchParams.get('member') || '');
+        if (wantMember) {
+          if (wantMember !== member.id && !isViewer(member) && !store.isManager(member.role)) {
+            return send(res, 403, { error: '只有创建者、管理员或文件提交者本人能打开这份文件' });
+          }
+          const memberMeta = store.memberFile(task, wantMember);
+          if (!memberMeta || !memberMeta.storedRel) return send(res, 404, { error: '这位成员还没有提交文件' });
+          const memberAbs = files.resolve(memberMeta.storedRel, memberMeta.root);
+          if (!memberAbs || !fs.existsSync(memberAbs)) return send(res, 404, { error: '文件不存在' });
+          return sendFile(res, memberMeta.displayName, fs.readFileSync(memberAbs));
+        }
         let meta = task.file;
-        if (u.searchParams.get('copy') === '1' && member.id !== task.creatorId) {
+        if (!isViewer(member) && u.searchParams.get('copy') === '1' && member.id !== task.creatorId) {
           meta = store.memberFile(task, member.id);
           let abs = meta ? files.resolve(meta.storedRel, meta.root) : '';
           if (!abs || !fs.existsSync(abs)) {
@@ -505,6 +640,7 @@ function startHost(opts) {
               buffer: fs.readFileSync(src)
             });
             store.attachMemberFile(state, task.id, member.id, saved);
+            mirrorMemberFile(task, saved);
             changed('memberFile');
             meta = saved;
           }
@@ -521,6 +657,7 @@ function startHost(opts) {
         const token = req.headers['x-token'] || u.searchParams.get('token');
         const member = memberOf(token);
         if (!member) return send(res, 401, { error: '未加入或已被移除' });
+        if (isViewer(member)) return send(res, 403, { error: '查看者只能查看，不能修改团队数据' });
         const body = await readBody(req);
         const type = body && body.type;
 
@@ -540,13 +677,27 @@ function startHost(opts) {
           return send(res, 200, { ok: true });
         }
 
-        const changedNow = store.apply(state, { ...body }, member.id);
-        store.touch(state, member.id);
+        const action = { ...body };
+        const changedNow = store.apply(state, action, member.id);
+        heartbeat(member.id);
         if (changedNow) {
+          if (type === 'addTask' && action.createdId && files) {
+            const task = store.findTask(state, action.createdId);
+            if (task) {
+              const wanted = task.folderRel || fileStore.taskFolderRel(state.boardId, task.text, task.id);
+              const rel = fileStore.ensureTaskFolder(files.root, wanted, task.id);
+              if (rel) task.folderRel = rel;
+            }
+          }
           if (type === 'removeMember') revoke(body.id);
           changed(type);
         }
-        return send(res, 200, { ok: true, changed: changedNow, state: state });
+        return send(res, 200, {
+          ok: true,
+          changed: changedNow,
+          createdId: type === 'addTask' && action.createdId ? action.createdId : '',
+          state: state
+        });
       }
 
       if (u.pathname === '/api/info') {
@@ -571,6 +722,10 @@ function startHost(opts) {
     if (typeof opts.onListen === 'function') opts.onListen(server.address().port);
   });
 
+  // 静默心跳：每 10 秒扫描一次成员在线状态（离线阈值 45 秒）
+  const presenceTimer = setInterval(scanPresence, 10000);
+  if (presenceTimer.unref) presenceTimer.unref();
+
   return {
     server,
     get port() {
@@ -578,6 +733,7 @@ function startHost(opts) {
       return a && a.port ? a.port : 0;
     },
     close() {
+      try { clearInterval(presenceTimer); } catch (e) { /* ignore */ }
       try {
         server.close();
       } catch (e) {
@@ -591,6 +747,11 @@ function startHost(opts) {
     ensureDeviceCode,
     setDeviceCode,
     resetDeviceCode,
+    ensureViewerCode,
+    getViewerCode() { return viewerCode; },
+    setViewerCode,
+    resetViewerCode,
+    isViewer,
     getDeviceCodes() {
       return Object.fromEntries(memberCodes);
     },

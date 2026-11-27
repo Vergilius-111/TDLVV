@@ -124,11 +124,6 @@ class Remote {
     return request({ baseUrl: this.baseUrl, path: `/api/join/status?requestId=${encodeURIComponent(requestId)}` });
   }
 
-  /** 用设备登录码换取同一成员的 token */
-  async deviceLogin(code) {
-    return request({ baseUrl: this.baseUrl, path: '/api/device/login', method: 'POST', body: { code } });
-  }
-
   async getState() {
     const r = await request({ baseUrl: this.baseUrl, path: '/api/state', token: this.token });
     return r.state;
@@ -163,8 +158,8 @@ class Remote {
     });
   }
 
-  async downloadTaskFile(taskId, copy = false) {
-    const q = `${copy ? 'copy=1&' : ''}task=${encodeURIComponent(String(taskId))}`;
+  async downloadTaskFile(taskId, copy = false, memberId = '') {
+    const q = `${copy ? 'copy=1&' : ''}${memberId ? `member=${encodeURIComponent(String(memberId))}&` : ''}task=${encodeURIComponent(String(taskId))}`;
     return requestRaw({
       baseUrl: this.baseUrl,
       path: `/api/file?${q}`,
@@ -289,17 +284,18 @@ function parseManual(text) {
 }
 
 /**
- * 找主机的顺序：同网段广播 → 手填地址 → 邀请码换公网地址
+ * 找主机的顺序：手填地址 → 邀请码查映射（自有中继优先，国内可达） → 同网段广播兜底。
+ * 映射放前面：隧道换址后能秒级拿到新地址，不必先空等局域网广播。
  */
 async function resolveHost(code, manual) {
-  const lan = await discover(code, 3500);
-  if (lan) return { baseUrl: `http://${lan.host}:${lan.port}`, via: 'lan', board: lan.board };
   if (manual) {
     const m = parseManual(manual);
     if (m) return { baseUrl: m.baseUrl, via: 'manual', board: '' };
   }
   const mp = await mapping.read(code);
   if (mp && mp.u) return { baseUrl: mp.u, via: 'relay', board: mp.n || '', owner: mp.o || '' };
+  const lan = await discover(code, 1500);
+  if (lan) return { baseUrl: `http://${lan.host}:${lan.port}`, via: 'lan', board: lan.board };
   return null;
 }
 

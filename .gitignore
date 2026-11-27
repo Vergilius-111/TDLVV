@@ -4,11 +4,18 @@ dist/
 *.dmg
 *.zip
 *.exe
+!pc/bin/cloudflared.exe
+!pc/bin/rcedit-x64.exe
+!mac/bin/cloudflared-mac-arm64
+!mac/bin/cloudflared-mac-x64
 
 # 本机数据与调试目录
 .dev-data/
 task-files/
 *.log
+build-output/
+wb-asar-check/
+old066/
 
 # 系统
 .DS_Store

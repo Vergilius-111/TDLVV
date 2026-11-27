@@ -35,7 +35,8 @@ function newTaskMessage(teamName, tasks, meId, lang) {
   const title = `TDLVV · ${teamName || (en ? 'Team' : '团队')}`;
   if (tasks.length === 1) {
     const t = tasks[0];
-    const mine = t.assigneeId && t.assigneeId === meId;
+    const ids = Array.isArray(t.assigneeIds) && t.assigneeIds.length ? t.assigneeIds : (t.assigneeId ? [t.assigneeId] : []);
+    const mine = ids.includes(meId);
     const prefix = en ? (mine ? 'Assigned to you: ' : 'New task: ') : (mine ? '指派给你：' : '新任务：');
     return { title, body: prefix + oneLine(t.text, 160), firstTaskId: t.id };
   }

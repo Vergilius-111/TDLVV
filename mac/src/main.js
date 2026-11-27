@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const dgram = require('dgram');
+const { spawn } = require('child_process');
 const { fileURLToPath } = require('url');
 
 const store = require('./store');
@@ -14,10 +15,14 @@ const backup = require('./backup');
 const transfer = require('./transfer');
 const fileStoreModule = require('./files');
 const aiApi = require('./aiapi');
+const summary = require('./summary');
+const workbuddy = require('./workbuddy');
 const { startHost, BEACON_PORT } = require('./server');
 const { Remote, resolveHost, discoverAll } = require('./client');
 const { Tunnel } = require('./tunnel');
 const mapping = require('./mapping');
+const updater = require('./updater');
+const portal = require('./portal');
 
 const SHOT = process.argv.includes('--shot');
 // 调试用：启动后直接显示窗口（正常启动时命名过就只留托盘，方便调试时找不到窗口）
@@ -95,7 +100,10 @@ const ctx = {
   notifyTasks: true,
   notifyDue: true,
   aiInstall: false,
-  aiGreeted: false
+  aiGreeted: false,
+  updateSeen: '', // 已经提示过的新版本号，避免每次启动反复弹窗
+  relayUrl: '', // 自有地址中继服务根地址，空则用 ntfy.sh
+  portalCode: '' // 主页设备码：一个码看到「我」的全部团队，以本人身份操作
 };
 
 let taskFiles = null;
@@ -158,6 +166,44 @@ function fileMetaRoot(meta, fallback) {
   return filePaths.fileMetaRoot(meta, fallback || taskFilesRoot);
 }
 
+/** 新建任务时落一个以任务标题命名的文件夹；成员端用本地缓存目录代替 */
+function ensureTaskFolderFor(t, task) {
+  if (!t || !task) return '';
+  if (t.kind === 'client') {
+    try {
+      const dir = cacheDirFor(t.id, task.id);
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch (e) {
+      return '';
+    }
+  }
+  const root = teamFileRoot(t);
+  if (!root) return '';
+  const wanted = task.folderRel || fileStoreModule.taskFolderRel(t.state.boardId, task.text, task.id);
+  const rel = fileStoreModule.ensureTaskFolder(root, wanted, task.id);
+  if (rel && rel !== task.folderRel) task.folderRel = rel;
+  return rel ? path.join(root, rel) : '';
+}
+
+/** 把成员提交的版本同步一份到任务同名文件夹，方便按任务统计和管理 */
+function mirrorMemberFile(t, task, meta) {
+  if (!t || !task || !meta || !meta.storedRel || t.kind === 'client') return;
+  const root = teamFileRoot(t);
+  if (!root) return;
+  ensureTaskFolderFor(t, task);
+  const src = teamFileService(t).resolve(meta.storedRel, meta.root);
+  if (!src || !fs.existsSync(src)) return;
+  const rel = task.folderRel || fileStoreModule.taskFolderRel(t.state.boardId, task.text, task.id);
+  const dst = path.join(root, rel, fileStoreModule.safeName(meta.displayName || '任务文件'));
+  try {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(src, dst);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 function collectFileMetas(state, fallbackRoot = taskFilesRoot) {
   return filePaths.collectFileMetas(state, fallbackRoot);
 }
@@ -200,6 +246,7 @@ function storedTeam(t) {
     token: t.token || '',
     tokens: t.tokens || {},
     deviceCodes: t.deviceCodes || {},
+    viewerCode: t.viewerCode || '',
     seenTaskIds: Array.isArray(t.seenTaskIds) ? t.seenTaskIds.slice(-5000) : null,
     filesRoot: t.filesRoot || '',
     state: t.state
@@ -221,11 +268,15 @@ function prefsPayload() {
     pin: ctx.pin,
     fired: ctx.fired,
     bounds: ctx.bounds || null,
+    miniBounds: miniBounds || null,
     autoStart: !!ctx.autoStart,
     notifyTasks: !!ctx.notifyTasks,
     notifyDue: !!ctx.notifyDue,
     aiInstall: !!ctx.aiInstall,
-    aiGreeted: !!ctx.aiGreeted
+    aiGreeted: !!ctx.aiGreeted,
+    updateSeen: ctx.updateSeen || '',
+    relayUrl: ctx.relayUrl || '',
+    portalCode: ctx.portalCode || ''
   };
 }
 
@@ -334,7 +385,9 @@ function normalizeState(state) {
     if (t.linkType === undefined) t.linkType = '';
     if (t.linkTarget === undefined) t.linkTarget = '';
     if (!Array.isArray(t.fields)) t.fields = [];
-    if (!t.progressBy || typeof t.progressBy !== 'object') t.progressBy = {};
+    if (!Array.isArray(t.assigneeIds)) t.assigneeIds = t.assigneeId ? [t.assigneeId] : [];
+    if (!t.personalDoneBy || typeof t.personalDoneBy !== 'object') t.personalDoneBy = {};
+    if (t.folderRel === undefined) t.folderRel = '';
     if (t.file === undefined) t.file = null;
     if (t.pendingFile === undefined) t.pendingFile = null;
     if (!t.memberFiles || typeof t.memberFiles !== 'object') t.memberFiles = {};
@@ -357,6 +410,10 @@ function applyPrefs(prefs) {
   ctx.notifyDue = p.notifyDue === undefined ? true : !!p.notifyDue;
   ctx.aiInstall = !!p.aiInstall;
   ctx.aiGreeted = !!p.aiGreeted;
+  ctx.updateSeen = String(p.updateSeen || '');
+  ctx.relayUrl = String(p.relayUrl || '');
+  ctx.portalCode = String(p.portalCode || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+  mapping.setRelayUrl(ctx.relayUrl);
 }
 
 function validTeamsData(data) {
@@ -374,6 +431,7 @@ function applyTeamsData(data) {
     token: t.token || '',
     tokens: t.tokens || {},
     deviceCodes: t.deviceCodes || {},
+    viewerCode: t.viewerCode || '',
     seenTaskIds: Array.isArray(t.seenTaskIds) ? t.seenTaskIds : null,
     filesRoot: t.filesRoot || '',
     state: t.state,
@@ -400,6 +458,7 @@ function loadAll() {
   }
   applyPrefs(prefs);
   if (prefs.bounds && typeof prefs.bounds === 'object') ctx.bounds = prefs.bounds;
+  if (prefs.miniBounds && typeof prefs.miniBounds === 'object') miniBounds = prefs.miniBounds;
   ctx.autoStart = prefs.autoStart === undefined ? true : !!prefs.autoStart;
 
   let data = null;
@@ -523,6 +582,7 @@ function bootHostTeam(t) {
     port: 0,
     tokens: t.tokens || {},
     deviceCodes: t.deviceCodes || {},
+    viewerCode: t.viewerCode || '',
     files: teamFileService(t),
     onChange: () => {
       saveTeams();
@@ -534,6 +594,10 @@ function bootHostTeam(t) {
     },
     onDeviceCodes: (codes) => {
       t.deviceCodes = codes;
+      saveTeams();
+    },
+    onViewerCode: (code) => {
+      t.viewerCode = code;
       saveTeams();
     },
     onError: (err) => setError(`共享服务启动失败：${err.message}`),
@@ -669,6 +733,150 @@ function startNearby() {
   }, 3000);
 }
 
+/* ---------------- 主页设备码：聚合「我」的全部团队 ---------------- */
+let portalSrv = null;            // portal.startPortal 返回的句柄
+let portalTunnel = null;         // 独立公网隧道
+let portalTunnelState = 'off';   // 隧道状态（不挂到实例上，避免覆盖 Tunnel.status 方法）
+let portalTunnelUrl = '';        // 隧道当前公网地址
+const PORTAL_MAP_CODE = 'PORTAL'; // 映射里的固定 key，便于换址后追新地址
+
+function portalBaseUrl() {
+  if (portalTunnelState === 'ready' && portalTunnelUrl) return portalTunnelUrl.replace(/\/$/, '');
+  return '';
+}
+
+function portalLink() {
+  const code = ctx.portalCode || '';
+  if (!code) return '';
+  const base = portalBaseUrl();
+  if (!base) return ''; // 隧道没就绪时不下发外网链接，避免给一个失效地址
+  return `${base}/p?code=${encodeURIComponent(code)}`;
+}
+
+async function publishPortalMapping() {
+  if (!ctx.portalCode || portalTunnelState !== 'ready' || !portalTunnelUrl) return;
+  try {
+    await mapping.publish(PORTAL_MAP_CODE, {
+      u: portalTunnelUrl,
+      n: ctx.myName || '我的任务',
+      o: ctx.myName || '我'
+    });
+  } catch (e) { /* 静默 */ }
+}
+
+/** portal 里下载文件：host/local 走本地文件服务，client 走 Remote 拉副本 */
+async function portalReadFile(teamId, taskId, memberId) {
+  const t = teamById(teamId);
+  if (!t || !t.state) return { ok: false, error: '团队不存在' };
+  const task = (t.state.tasks || []).find((x) => x.id === taskId);
+  if (!task) return { ok: false, error: '任务不存在' };
+  try {
+    if (t.kind === 'client') {
+      if (!t.online) return { ok: false, error: '这个团队暂时离线，连上创建者后再下载' };
+      const remote = new Remote({ baseUrl: t.baseUrl, token: t.token });
+      const r = await remote.downloadTaskFile(taskId, false, memberId);
+      return { ok: true, name: r.name, buffer: r.buffer };
+    }
+    const files = teamFileService(t);
+    let meta = null;
+    if (memberId) meta = store.memberFile(task, memberId);
+    else {
+      const me = (t.state.members || []).find((m) => m.id === t.meId);
+      meta = me ? ensureMemberCopy(t, task, me) : task.file;
+    }
+    if (!meta || !meta.storedRel) return { ok: false, error: '这条任务还没有文件' };
+    const abs = files.resolve(meta.storedRel, meta.root);
+    if (!abs || !fs.existsSync(abs)) return { ok: false, error: '文件不存在' };
+    return { ok: true, name: meta.displayName || '任务文件', buffer: fs.readFileSync(abs) };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || '下载失败') };
+  }
+}
+
+/** portal 里上传文件：复用本机文件服务与 store.apply 变更链路 */
+async function portalUploadFile(teamId, taskId, name, buffer) {
+  const t = teamById(teamId);
+  if (!t || !t.state) return { ok: false, error: '团队不存在' };
+  const task = (t.state.tasks || []).find((x) => x.id === taskId);
+  if (!task) return { ok: false, error: '任务不存在' };
+  const me = (t.state.members || []).find((m) => m.id === t.meId);
+  if (!me) return { ok: false, error: '找不到当前成员' };
+  try {
+    if (t.kind === 'client') {
+      if (!t.online) return { ok: false, error: '这个团队暂时离线，连上创建者后再上传' };
+      const remote = new Remote({ baseUrl: t.baseUrl, token: t.token });
+      const up = await remote.uploadTaskFile(taskId, name, buffer);
+      if (up && up.state) {
+        normalizeState(up.state);
+        t.state = up.state;
+        t.lastRev = up.state.rev;
+        saveTeams();
+        push();
+      }
+      return { ok: true };
+    }
+    const res = saveTaskFile(t, task, me, name, buffer);
+    if (res.changed) {
+      t.state.rev = (Number(t.state.rev) || 0) + 1;
+      t.name = t.state.boardName;
+      saveTeams();
+      push();
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || '上传失败') };
+  }
+}
+
+function startPortalService() {
+  if (portalSrv) return;
+  portalSrv = portal.startPortal({
+    port: 0,
+    getCode: () => ctx.portalCode,
+    getTeams: () => ctx.teams,
+    applyAction: async (teamId, type, payload) => applyToTeam(teamById(teamId), type, payload),
+    readFile: portalReadFile,
+    uploadFile: portalUploadFile,
+    onListen: (port) => {
+      if (!portalTunnel) {
+        portalTunnel = new Tunnel({
+          onUrl: (url) => {
+            portalTunnelUrl = url.replace(/\/$/, '');
+            publishPortalMapping();
+            push();
+          },
+          onStatus: (s) => {
+            portalTunnelState = s.state;
+            push();
+          }
+        });
+      }
+      portalTunnel.start(port);
+    },
+    onError: (err) => { /* 端口占用等，静默 */ }
+  });
+}
+
+function stopPortalService() {
+  if (portalTunnel) { try { portalTunnel.stop(); } catch (e) {} portalTunnel = null; }
+  if (portalSrv) { try { portalSrv.close(); } catch (e) {} portalSrv = null; }
+  portalTunnelUrl = '';
+  portalTunnelState = 'off';
+}
+
+/** 生成/重置主页设备码：换码即踢掉所有已登录设备 */
+function setPortalCode(code) {
+  ctx.portalCode = String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+  savePrefs();
+  if (portalSrv) portalSrv.invalidate();
+  if (ctx.portalCode) {
+    startPortalService();
+    publishPortalMapping();
+  }
+  push();
+  return ctx.portalCode;
+}
+
 /* ---------------- 公网隧道 + 邀请码映射 ---------------- */
 function startTunnel(t) {
   if (t.tunnel) t.tunnel.stop();
@@ -687,7 +895,7 @@ function startTunnel(t) {
   });
   t.tunnel.start(t.hostPort);
   if (t.publishTimer) clearInterval(t.publishTimer);
-  t.publishTimer = setInterval(() => publishMapping(t), 25 * 60 * 1000);
+  t.publishTimer = setInterval(() => publishMapping(t), 5 * 60 * 1000);
 }
 
 async function publishMapping(t) {
@@ -774,7 +982,8 @@ async function refreshTeam(t) {
       t.error = '连不上创建者，正在重连…';
       push();
     }
-    if (t.failCount % 5 === 0 && t.code) {
+    // 每失败 2 次（约 3 秒）就重新解析地址：隧道换址后成员秒级追上新地址
+    if (t.failCount % 2 === 0 && t.code) {
       try {
         const found = await resolveHost(t.code, '');
         if (found && found.baseUrl !== t.baseUrl) {
@@ -856,77 +1065,6 @@ function deviceLinkBase(t) {
   return '';
 }
 
-function parseDeviceLink(raw) {
-  const text = String(raw || '').trim();
-  if (!text) throw new Error('请粘贴设备登录链接');
-  let url;
-  try {
-    url = new URL(text);
-  } catch (e) {
-    throw new Error('链接格式不对，请复制创建者电脑生成的完整链接');
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('设备登录链接必须是 http 或 https 地址');
-  }
-  const code = String(url.searchParams.get('code') || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
-  if (!code) throw new Error('链接里没有设备码，请重新生成');
-  return { baseUrl: url.origin, code };
-}
-
-async function loginByDeviceLink(raw) {
-  const { baseUrl, code } = parseDeviceLink(raw);
-  const remote = new Remote({ baseUrl });
-  const login = await remote.deviceLogin(code);
-  if (!login || !login.token) throw new Error('设备码无效，请让创建者检查或重置');
-  remote.token = login.token;
-  const state = await remote.getState();
-  if (!state) throw new Error('创建者电脑没有返回团队数据');
-  normalizeState(state);
-  const me = (state.members || []).find((m) => m.id === (login.me && login.me.id));
-  if (!me) throw new Error('登录后找不到这个成员，可能已被移出团队');
-
-  let team = ctx.teams.find((t) => t.kind === 'client' && t.state && t.state.boardId === state.boardId);
-  if (!team) {
-    team = {
-      id: store.rid(8),
-      kind: 'client',
-      name: state.boardName,
-      meId: me.id,
-      code: '',
-      baseUrl,
-      token: login.token,
-      state,
-      online: true,
-      error: '',
-      failCount: 0,
-      lastRev: state.rev
-    };
-    ctx.teams.push(team);
-  } else {
-    team.name = state.boardName;
-    team.meId = me.id;
-    team.baseUrl = baseUrl;
-    team.token = login.token;
-    team.state = state;
-    team.online = true;
-    team.error = '';
-    team.failCount = 0;
-    team.lastRev = state.rev;
-    if (team.pollTimer) {
-      clearTimeout(team.pollTimer);
-      team.pollTimer = null;
-      team.polling = false;
-    }
-  }
-  // 第二台设备登录时，不把已经在桌面端看过的任务再弹一遍
-  team.seenTaskIds = notify.visibleTaskIds(state, team.meId).slice(-5000);
-  ctx.activeId = team.id;
-  saveTeams();
-  startPoll(team);
-  push();
-  return { ok: true, teamId: team.id, name: state.boardName, meId: team.meId };
-}
-
 /* ---------------- 视图 ---------------- */
 function teamRole(t) {
   if (t.kind === 'local') return 'owner';
@@ -975,12 +1113,36 @@ function view() {
     teams: ctx.teams.map(serializeTeam),
     platform: process.platform,
     taskFilesRoot,
+    version: app.getVersion(),
+    relayUrl: ctx.relayUrl || '',
+    portal: {
+      code: ctx.portalCode || '',
+      link: portalLink(),
+      tunnelState: portalTunnelState
+    },
     ai: aiBridge ? { ...aiBridge, installPrompt: !!(ctx.aiInstall && !ctx.aiGreeted) } : null
   };
 }
 
 function push() {
   if (win && !win.isDestroyed()) win.webContents.send('state', view());
+}
+
+/* ---------------- 检查更新（只提示、不自动下载安装） ---------------- */
+let updateTimer = null;
+async function autoCheckUpdate() {
+  if (SHOT) return;
+  const info = await updater.check(app.getVersion());
+  // 网络失败或已是最新：静默，不打扰用户
+  if (!info.ok || !info.available) return;
+  // 这个新版本已经提示过一次就不再弹（用户可在设置里手动再查）
+  if (ctx.updateSeen === info.latest) return;
+  if (win && !win.isDestroyed()) win.webContents.send('update:available', info);
+}
+function startUpdateCheck() {
+  setTimeout(autoCheckUpdate, 6000); // 启动后延迟，别和初始化抢资源
+  if (updateTimer) clearInterval(updateTimer);
+  updateTimer = setInterval(autoCheckUpdate, 30 * 60 * 1000); // 常驻时每 30 分钟复查
 }
 
 function setError(msg) {
@@ -1079,13 +1241,14 @@ function fmtClock(ts) {
 let boundsTimer = null;
 let miniOn = false;
 let expandedBounds = null;
-let dragOffset = null;
+let miniBounds = null; // 用户拖到/收起后的小条位置，展开时以此为锚向下展开
+let dragOrigin = null;
 let tray = null;
 let quitting = false;
 
-function clampWindowBounds(b) {
+function clampWindowBounds(b, display) {
   try {
-    const disp = screen.getDisplayMatching({ x: b.x, y: b.y, width: b.width, height: b.height });
+    const disp = display || screen.getDisplayMatching({ x: b.x, y: b.y, width: b.width, height: b.height });
     const a = disp.workArea;
     const width = Math.min(a.width, Math.max(340, b.width));
     const height = Math.min(a.height, Math.max(460, b.height));
@@ -1137,6 +1300,7 @@ function applyPendingMiniBounds() {
     win.setMinimumSize(320, 88);
     win.setBounds(to);
     miniOn = true;
+    miniBounds = { ...to };
     ctx.bounds = { ...(expandedBounds || to) };
     savePrefs();
   } catch (e) {
@@ -1325,9 +1489,24 @@ function createWindow() {
   let resizeNotifyTimer = null;
   win.on('will-resize', (event, newBounds) => {
     if (!win || win.isDestroyed()) return;
+    // 拖动窗口期间系统可能误报 resize（高 DPI + 透明无边框窗口），一律拒绝，
+    // 防止拖动时窗口被自动拉大。真正的手动拉伸不会处于拖动状态。
+    if (dragOrigin) {
+      event.preventDefault();
+      return;
+    }
     // 手动拉伸时也不让主界面超出当前屏幕工作区；动画/小条状态下不干预
     if (!miniOn && !winBoundsAnim && newBounds) {
-      const safe = clampWindowBounds(newBounds);
+      // 用窗口当前位置所在的显示器做约束；按 newBounds 找显示器时，
+      // 横向拉到两台显示器交界处会选中另一块屏，导致宽度突然被改。
+      let disp = null;
+      try {
+        const cur = win.getBounds();
+        disp = screen.getDisplayMatching({ x: cur.x, y: cur.y, width: 1, height: 1 });
+      } catch (err) {
+        /* ignore */
+      }
+      const safe = clampWindowBounds(newBounds, disp);
       if (safe && (safe.x !== newBounds.x || safe.y !== newBounds.y || safe.width !== newBounds.width || safe.height !== newBounds.height)) {
         event.preventDefault();
         try { win.setBounds(safe); } catch (e) { /* ignore */ }
@@ -1352,6 +1531,14 @@ function createWindow() {
   win.on('hide', () => {
     if (Date.now() < userHidingUntil) return;
     setTimeout(recoverMiniWindow, 220);
+  });
+  // 窗口失焦/获得焦点转发给渲染层：切到别的窗口时自动收成小条，
+  // 切回来时取消待执行的收起（与鼠标移入移出等价）。
+  win.on('blur', () => {
+    if (win && !win.isDestroyed()) win.webContents.send('win:focus', false);
+  });
+  win.on('focus', () => {
+    if (win && !win.isDestroyed()) win.webContents.send('win:focus', true);
   });
 
   win.once('ready-to-show', () => {
@@ -1444,6 +1631,7 @@ function ensureMemberCopy(t, task, member) {
     buffer: fs.readFileSync(src)
   });
   store.attachMemberFile(t.state, task.id, member.id, saved);
+  mirrorMemberFile(t, task, saved);
   saveTeams();
   push();
   return store.memberFile(task, member.id);
@@ -1476,6 +1664,7 @@ function saveTaskFile(t, task, member, name, buffer) {
     buffer
   });
   const changedNow = store.attachMemberFile(t.state, task.id, member.id, saved);
+  mirrorMemberFile(t, task, saved);
   return { saved, changed: changedNow };
 }
 
@@ -1485,6 +1674,9 @@ async function applyToTeam(t, type, payload) {  if (!t || !t.state) return { ok:
       const action = { type, ...(payload || {}) };
       const changed = store.apply(t.state, action, 'me');
       if (changed) {
+        if (type === 'addTask' && action.createdId) {
+          ensureTaskFolderFor(t, store.findTask(t.state, action.createdId));
+        }
         t.name = t.state.boardName;
         saveTeams();
         push();
@@ -1500,6 +1692,9 @@ async function applyToTeam(t, type, payload) {  if (!t || !t.state) return { ok:
       const changed = store.apply(t.state, action, t.meId);
       store.touch(t.state, t.meId);
       if (changed) {
+        if (type === 'addTask' && action.createdId) {
+          ensureTaskFolderFor(t, store.findTask(t.state, action.createdId));
+        }
         t.name = t.state.boardName;
         saveTeams();
         push();
@@ -1682,6 +1877,23 @@ async function openClientTaskFile(t, task, opts) {
   // 落盘后的这份内容 = 服务器上的最新副本，所以既作为"未改动"基线
   fileSync()[key] = { name, size: st.size, mtime: st.mtimeMs, version: Number(mine.version) || 0 };
   saveFileSync();
+  return { ok: true, path: abs };
+}
+
+/** 客户端打开某位成员提交的版本：从主机下载到本机缓存再打开 */
+async function openClientMemberFile(t, task, memberId, meta) {
+  const remote = new Remote({ baseUrl: t.baseUrl, token: t.token });
+  const r = await remote.downloadTaskFile(task.id, true, memberId);
+  const name = fileStoreModule.safeName(r.name || meta.displayName || '任务文件');
+  const dir = cacheDirFor(t.id, task.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const abs = path.join(dir, `${memberId}-${name}`);
+  try {
+    fs.writeFileSync(abs, r.buffer);
+  } catch (err) {
+    if (fs.existsSync(abs)) return { ok: true, path: abs };
+    return { ok: false, error: `写入文件失败：${(err && err.message) || ''}` };
+  }
   return { ok: true, path: abs };
 }
 
@@ -1934,11 +2146,12 @@ function registerIpc() {
   });
 
   ipcMain.handle('team:deviceLink', (e, payload = {}) => {
-    const { teamId, memberId } = payload;
+    const { teamId, memberId, kind } = payload;
     const t = ownerHost(teamId);
     if (!t) return { ok: false, error: '只有创建者能生成设备链接' };
-    const code = t.server.ensureDeviceCode(memberId || t.meId);
-    if (!code) return { ok: false, error: '找不到这个成员' };
+    const isViewer = kind === 'viewer';
+    const code = isViewer ? t.server.ensureViewerCode() : t.server.ensureDeviceCode(memberId || t.meId);
+    if (!code) return { ok: false, error: isViewer ? '生成查看者码失败' : '找不到这个成员' };
     const base = deviceLinkBase(t);
     if (!base) return { ok: false, error: '还没拿到可访问的地址，等公网通道就绪再试' };
     saveTeams();
@@ -1946,18 +2159,37 @@ function registerIpc() {
       ok: true,
       url: `${base}/m?code=${encodeURIComponent(code)}`,
       code,
+      viewer: isViewer,
       network: t.tunnelState === 'ready' ? 'tunnel' : 'lan',
       base
     };
   });
 
-  ipcMain.handle('team:deviceLogin', async (e, link) => {
-    try {
-      return await loginByDeviceLink(link);
-    } catch (err) {
-      return { ok: false, error: String((err && err.message) || '设备登录失败') };
-    }
+  /* 查看者码：只读身份，看得到全部任务和文件 */
+  ipcMain.handle('team:viewerCode', (e, teamId) => {
+    const t = ownerHost(teamId);
+    if (!t) return { ok: false, error: '只有创建者能查看设备码' };
+    return { ok: true, code: t.server.ensureViewerCode() };
   });
+  ipcMain.handle('team:viewerSetCode', (e, { teamId, code }) => {
+    const t = ownerHost(teamId);
+    if (!t) return { ok: false, error: '只有创建者能修改设备码' };
+    const r = t.server.setViewerCode(code);
+    if (r.ok) saveTeams();
+    return r;
+  });
+  ipcMain.handle('team:viewerResetCode', (e, teamId) => {
+    const t = ownerHost(teamId);
+    if (!t) return { ok: false, error: '只有创建者能重置设备码' };
+    const r = t.server.resetViewerCode();
+    if (r.ok) saveTeams();
+    return r;
+  });
+
+  /* 主页设备码：一个码看到「我」的全部团队 */
+  ipcMain.handle('portal:code', () => ({ ok: true, code: ctx.portalCode || '' }));
+  ipcMain.handle('portal:setCode', (e, code) => ({ ok: true, code: setPortalCode(code) }));
+  ipcMain.handle('portal:link', () => ({ ok: true, url: portalLink(), tunnelState: portalTunnelState }));
 
   ipcMain.handle('team:join', async (e, { code, manual }) => {
     const clean = String(code || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -2130,14 +2362,31 @@ function registerIpc() {
   });
 
 
-  ipcMain.handle('task:openFile', async (e, { teamId, taskId }) => {
+  ipcMain.handle('task:openFile', async (e, { teamId, taskId, memberId }) => {
     const t = teamById(teamId);
     if (!t || !t.state) return { ok: false, error: '团队不存在' };
     const task = (t.state.tasks || []).find((x) => x.id === taskId);
-    if (!task || !task.file) return { ok: false, error: '这条任务还没有文件' };
+    if (!task) return { ok: false, error: '任务不存在' };
+    if (!memberId && !task.file) return { ok: false, error: '这条任务还没有文件' };
     try {
       let abs = '';
-      if (t.kind === 'client') {
+      if (memberId) {
+        const me = (t.state.members || []).find((m) => m.id === t.meId);
+        if (!me) return { ok: false, error: '找不到当前成员' };
+        if (memberId !== t.meId && !store.isManager(me.role)) {
+          return { ok: false, error: '只有创建者、管理员或文件提交者本人能打开这份文件' };
+        }
+        const meta = store.memberFile(task, memberId);
+        if (!meta) return { ok: false, error: '这位成员还没有提交文件' };
+        if (t.kind === 'client') {
+          if (!t.online) return { ok: false, error: '当前离线，连上创建者后再打开文件' };
+          const r = await openClientMemberFile(t, task, memberId, meta);
+          if (!r.ok) return r;
+          abs = r.path;
+        } else {
+          abs = teamFileService(t).resolve(meta.storedRel, meta.root);
+        }
+      } else if (t.kind === 'client') {
         if (!t.online) return { ok: false, error: '当前离线，连上创建者后再打开文件' };
         const r = await openClientTaskFile(t, task, { sync: true });
         if (!r.ok) return r;
@@ -2153,6 +2402,23 @@ function registerIpc() {
       return err ? { ok: false, error: err } : { ok: true, path: abs };
     } catch (err) {
       return { ok: false, error: String((err && err.message) || '打开文件失败') };
+    }
+  });
+
+  ipcMain.handle('task:openFolder', async (e, { teamId, taskId }) => {
+    const t = teamById(teamId);
+    if (!t || !t.state) return { ok: false, error: '团队不存在' };
+    const task = (t.state.tasks || []).find((x) => x.id === taskId);
+    if (!task) return { ok: false, error: '任务不存在' };
+    try {
+      const abs = ensureTaskFolderFor(t, task);
+      if (!abs || !fs.existsSync(abs)) return { ok: false, error: '打开文件夹失败' };
+      saveTeams();
+      push();
+      const err = await shell.openPath(abs);
+      return err ? { ok: false, error: err } : { ok: true, path: abs };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || '打开文件夹失败') };
     }
   });
 
@@ -2201,6 +2467,7 @@ function registerIpc() {
         buffer: buf
       });
       store.attachMemberFile(t.state, task.id, me.id, saved);
+      mirrorMemberFile(t, task, saved);
       saveTeams();
       push();
       return { ok: true, file: saved };
@@ -2224,35 +2491,160 @@ function registerIpc() {
     return { ok: true };
   });
 
+  /**
+   * 标记完成后，创建者/管理员主动发起 AI 汇总请求。
+   * 在任务同名文件夹里写一份结构化请求(JSON + Markdown 提示词)，
+   * 然后唤起 WorkBuddy 并打开该文件夹，让 AI 立即接手，不再依赖后台轮询。
+   */
+  ipcMain.handle('ai:requestSummary', async (e, { teamId, taskId, note } = {}) => {
+    const t = teamById(teamId);
+    if (!t || !t.state) return { ok: false, error: '团队不存在' };
+    const task = (t.state.tasks || []).find((x) => x.id === taskId);
+    if (!task) return { ok: false, error: '任务不存在' };
+    if (t.kind !== 'local') {
+      const me = (t.state.members || []).find((m) => m.id === t.meId);
+      if (!me || !store.isManager(me.role)) return { ok: false, error: '只有创建者或管理员能发起汇总' };
+    }
+    try {
+      const folder = ensureTaskFolderFor(t, task);
+      if (!folder) return { ok: false, error: '任务文件夹不可用' };
+      const fsSvc = teamFileService(t);
+      const request = summary.buildRequest({
+        teamName: t.name || '',
+        teamId: t.kind === 'local' ? '' : t.id,
+        task,
+        note,
+        taskFolder: folder,
+        aiBridge,
+        io: {
+          members: (t.state && t.state.members) || [],
+          displayName: (m) => store.displayName(m),
+          resolveFile: (rel, root) => fsSvc.resolve(rel, root),
+          exists: (p) => fs.existsSync(p)
+        }
+      });
+      const written = summary.writeRequest(folder, request);
+      const jsonPath = written.jsonPath;
+      const mdPath = written.mdPath;
+
+      // 唤起 WorkBuddy：优先复用「之前对话过的会话窗口」，找不到才新建对话。
+      // 用 workbuddy://chat/<sessionId> 深链会复用已有窗口并聚焦该会话；
+      // 完全没有会话时才用 workbuddy://home 新建。
+      const memoryFile = path.join(app.getPath('userData'), 'workbuddy-session.json');
+      const plan = workbuddy.planLaunch(memoryFile, workbuddy.projectsRoot());
+      let launched = false;
+      try {
+        const url = plan.url;
+        if (process.platform === 'win32') {
+          const exe = path.join(os.homedir(), '..', '..', 'workbuddy', 'WorkBuddy.exe');
+          const candidates = [exe, 'D:\\workbuddy\\WorkBuddy.exe'];
+          const found = candidates.find((p) => { try { return fs.existsSync(p); } catch (x) { return false; } });
+          if (found) {
+            // 把深链作为参数传给 exe：已运行时由 WorkBuddy 的第二实例处理并复用窗口，
+            // 未运行时由注册表 workbuddy:// 协议处理器打开指定会话。
+            const child = spawn(found, [url], { detached: true, stdio: 'ignore' });
+            child.unref();
+            launched = true;
+          }
+        }
+        if (!launched) {
+          await shell.openExternal(plan.url);
+          launched = true;
+        }
+      } catch (err) {
+        /* 唤起失败不影响请求文件落盘 */
+      }
+      // 打开任务文件夹，方便用户/AI 直接看到请求文件
+      try { await shell.openPath(folder); } catch (err) { /* ignore */ }
+
+      // 把完整提示词放进剪贴板，唤起 WorkBuddy 后自动粘贴并发送，
+      // 让 AI 立即接手处理文件（而不是只打开一个空会话等用户手动输入）。
+      let autoSent = false;
+      try {
+        const prompt = summary.promptText(request);
+        clipboard.writeText(prompt);
+        if (process.platform === 'win32' && launched) {
+          const ps1 = path.join(process.resourcesPath || path.join(__dirname, '..'), 'workbuddy-send.ps1');
+          if (fs.existsSync(ps1)) {
+            const child = spawn('powershell', [
+              '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+              '-File', ps1, '-ExeName', 'WorkBuddy', '-WaitMs', '2600'
+            ], { detached: true, stdio: 'ignore' });
+            child.unref();
+            autoSent = true;
+          }
+        }
+      } catch (err) {
+        /* 自动发送失败不影响请求文件落盘；提示词仍在剪贴板，用户可手动粘贴 */
+      }
+
+      return { ok: true, folder, jsonPath, mdPath, launched, autoSent, session: plan.mode, sessionId: plan.id };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || '生成汇总请求失败') };
+    }
+  });
+
   ipcMain.handle('win:pin', (e, on) => {
     togglePin(on);
     return ctx.pin;
   });
 
+  // 拖动用「渲染层传来的 CSS 像素位移 × 当前缩放」算窗口 DIP 位置。
+  // 关键：拖动期间必须锁死宽高。Windows 高 DPI（125%/150%）下，frame:false +
+  // resizable:true 的透明窗口会被系统误判成边缘 resize，导致拖着拖着窗口
+  // 向右下变大。这里每帧用 setBounds 写入固定宽高，尺寸绝不被拖动改变。
   ipcMain.on('win:dragStart', () => {
-    if (!win || win.isDestroyed() || miniOn) return;
+    if (!win || win.isDestroyed()) return;
     try {
-      const p = screen.getCursorScreenPoint();
-      const b = win.getBounds();
-      dragOffset = { x: p.x - b.x, y: p.y - b.y };
+      dragOrigin = {
+        bounds: win.getBounds(),
+        zoom: win.webContents.getZoomFactor() || 1
+      };
+      // 系统层暂时禁用缩放：Windows 高 DPI 透明无边框窗口在拖动时，
+      // 顶栏可能命中系统 resize 边框，导致窗口被自动拉大。
+      win.setResizable(false);
     } catch (e) {
-      dragOffset = null;
+      dragOrigin = null;
     }
   });
 
-  ipcMain.on('win:dragMove', () => {
-    if (!win || win.isDestroyed() || !dragOffset) return;
+  ipcMain.on('win:dragMove', (e, delta) => {
+    if (!win || win.isDestroyed() || !dragOrigin) return;
+    const dx = Number(delta && delta.dx) || 0;
+    const dy = Number(delta && delta.dy) || 0;
+    if (!dx && !dy) return;
     try {
-      const p = screen.getCursorScreenPoint();
-      win.setPosition(Math.round(p.x - dragOffset.x), Math.round(p.y - dragOffset.y));
-    } catch (e) {
+      const z = dragOrigin.zoom || 1;
+      const base = dragOrigin.bounds;
+      const x = Math.round(base.x + dx * z);
+      const y = Math.round(base.y + dy * z);
+      const cur = win.getBounds();
+      // 正常情况只移动；一旦高 DPI 下系统偷偷改了宽高，立刻用原始尺寸纠正回来
+      if (cur.width !== base.width || cur.height !== base.height) {
+        win.setBounds({ x, y, width: base.width, height: base.height });
+      } else {
+        win.setPosition(x, y);
+      }
+    } catch (err) {
       /* ignore */
     }
   });
 
   ipcMain.on('win:dragEnd', () => {
-    dragOffset = null;
-    saveBoundsSoon();
+    dragOrigin = null;
+    try {
+      if (win && !win.isDestroyed()) win.setResizable(true);
+    } catch (e) {
+      /* ignore */
+    }
+    // 小条也能拖动定位：记住用户拖到的位置，展开时从这里向下长
+    if (miniOn && win && !win.isDestroyed()) {
+      const b = win.getBounds();
+      miniBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+      savePrefs();
+    } else {
+      saveBoundsSoon();
+    }
   });
 
   ipcMain.handle('win:mini', (e, payload) => {
@@ -2282,9 +2674,13 @@ function registerIpc() {
         const offset = Math.max(0, Math.round(((Number(payload.topOffset) || 0) - 1) * zoom));
         const disp = screen.getDisplayMatching(base);
         const area = disp.workArea;
-        const miniY = Math.min(Math.max(base.y + offset, area.y), area.y + area.height - h);
+        // 若用户拖过小条，优先回到用户定的位置（可贴屏幕最上/右上角）；
+        // 否则按任务行偏移收起。两种都 clamp 在工作区内。
+        const anchorX = miniBounds ? miniBounds.x : base.x;
+        const anchorY = miniBounds ? miniBounds.y : base.y + offset;
+        const miniY = Math.min(Math.max(anchorY, area.y), area.y + area.height - h);
         const to = {
-          x: Math.min(Math.max(base.x, area.x), area.x + area.width - base.width),
+          x: Math.min(Math.max(anchorX, area.x), area.x + area.width - base.width),
           y: miniY,
           width: Math.min(base.width, area.width),
           height: h
@@ -2436,9 +2832,13 @@ function registerIpc() {
         const offset = Math.max(0, Math.round(((Number(payload.topOffset) || 0) - 1) * zoom));
         const disp = screen.getDisplayMatching(base);
         const area = disp.workArea;
-        const miniY = Math.min(Math.max(base.y + offset, area.y), area.y + area.height - h);
+        // 若用户拖过小条，优先回到用户定的位置（可贴屏幕最上/右上角）；
+        // 否则按任务行偏移收起。两种都 clamp 在工作区内。
+        const anchorX = miniBounds ? miniBounds.x : base.x;
+        const anchorY = miniBounds ? miniBounds.y : base.y + offset;
+        const miniY = Math.min(Math.max(anchorY, area.y), area.y + area.height - h);
         const to = {
-          x: Math.min(Math.max(base.x, area.x), area.x + area.width - base.width),
+          x: Math.min(Math.max(anchorX, area.x), area.x + area.width - base.width),
           y: miniY,
           width: Math.min(base.width, area.width),
           height: h
@@ -2478,6 +2878,47 @@ function registerIpc() {
     e.returnValue = { ok: true };
   });
 
+  // 展开前把展开窗口的基准位置重设到小条当前所在处：
+  // 小条可以被拖到屏幕任意位置（含最上/右上角），从这里向下（并朝屏幕中间）展开。
+  // expandedBounds.y = 小条 y - 任务行偏移，这样动画第一帧正好落在小条上，不会跳。
+  ipcMain.on('win:miniAnchor', (e, payload) => {
+    if (!win || win.isDestroyed() || !miniOn || !miniBounds) {
+      e.returnValue = { ok: false };
+      return;
+    }
+    try {
+      const base = expandedBounds || ctx.bounds || win.getBounds();
+      const offsetDev = Math.max(0, Math.round(Number(payload && payload.offsetDev) || 0));
+      const raw = {
+        x: miniBounds.x,
+        y: miniBounds.y - offsetDev,
+        width: base.width,
+        height: base.height
+      };
+      const target = clampWindowBounds(raw) || raw;
+      expandedBounds = target;
+      ctx.bounds = { ...target };
+      e.returnValue = { ok: true };
+    } catch (err) {
+      e.returnValue = { ok: false };
+    }
+  });
+
+  ipcMain.handle('relay:set', (e, url) => {
+    ctx.relayUrl = mapping.setRelayUrl(url);
+    savePrefs();
+    // 配置一改就立即把当前所有团队的地址重新发布一次，让新中继马上生效
+    for (const t of ctx.teams) {
+      if (t.kind === 'host' && t.tunnelUrl) publishMapping(t);
+    }
+    return { ok: true, relayUrl: ctx.relayUrl };
+  });
+  ipcMain.handle('update:check', () => updater.check(app.getVersion()));
+  ipcMain.handle('update:seen', (e, version) => {
+    ctx.updateSeen = String(version || '');
+    savePrefs();
+    return true;
+  });
   ipcMain.handle('app:autostart', (e, on) => setAutoStart(on));
   ipcMain.handle('notify:set', (e, data) => {
     const d = data && typeof data === 'object' ? data : {};
@@ -2559,6 +3000,8 @@ if (!gotLock) {
     reminderTimer = setInterval(checkReminders, 20000);
     inviteTimer = setInterval(refreshInviteCodes, 20000);
     setTimeout(checkReminders, 3000);
+    startUpdateCheck();
+    if (ctx.portalCode) startPortalService(); // 配了主页设备码才常驻服务与隧道
     setTimeout(push, 300);
   });
 
@@ -2582,11 +3025,13 @@ if (!gotLock) {
       if (t.tunnel) t.tunnel.stop();
       if (t.publishTimer) clearInterval(t.publishTimer);
     }
+    stopPortalService();
     if (statusTimer) clearInterval(statusTimer);
     if (beaconTimer) clearInterval(beaconTimer);
     if (nearbyPruneTimer) clearInterval(nearbyPruneTimer);
     if (reminderTimer) clearInterval(reminderTimer);
     if (backupTimer) clearInterval(backupTimer);
+    if (updateTimer) clearInterval(updateTimer);
     try {
       if (beaconSock) beaconSock.close();
     } catch (e) {

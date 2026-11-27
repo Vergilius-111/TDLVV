@@ -86,7 +86,13 @@
       </div>
       <div class="composerFooter">
         <div class="composerTools">
-          <button class="addTaskBtn" id="btnAddTask" title="新增任务（Ctrl + Enter）" aria-label="新增任务">＋</button>
+          <button class="addTaskBtn miniNowBtn" id="btnMiniNow" title="马上收成迷你条" aria-label="马上收成迷你条">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 15h16" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>
+              <path d="M8 10l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity=".75"/>
+            </svg>
+          </button>
+          <button class="addTaskBtn" id="btnAddTask" title="新增任务（Enter 发布，Shift+Enter / Ctrl+Enter 换行）" aria-label="新增任务">＋</button>
           <button class="linkBtn" id="linkUrlBtn" title="添加网页链接" aria-label="添加网页链接"><span class="linkIco">🌐</span></button>
           <button class="linkBtn" id="linkPathBtn" title="添加任务文件（可拖动或选择）" aria-label="添加任务文件"><span class="linkIco">💻</span></button>
         </div>
@@ -134,6 +140,23 @@
         <button class="ghost" id="saveName">保存</button>
       </div>
 
+      <div class="settingsDivider"></div>
+
+      <h3>我的设备码（看全部任务）</h3>
+      <p class="tips">生成一个只属于你的设备码，用手机或浏览器打开后，能看到你的个人任务和所在所有团队的任务，并以你本人身份操作。需要这台电脑常开并联网。</p>
+      <div class="deviceCodeRow">
+        <input id="portalCodeInput" maxlength="6" placeholder="未生成" autocomplete="off" spellcheck="false" data-no-i18n />
+        <button class="secondary" id="btnPortalGen">生成</button>
+        <button class="secondary" id="btnPortalReset">重置</button>
+      </div>
+      <div class="deviceLinkText" id="portalLinkText">还没有生成链接</div>
+      <div class="rowBtns">
+        <button class="secondary" id="btnPortalCopy" disabled>复制链接</button>
+      </div>
+      <p class="tips" id="portalHint">公网通道就绪后会自动生成链接；换网络或重启后链接可能变化，点「复制链接」取最新的。</p>
+
+      <div class="settingsDivider"></div>
+
       <h3>我的团队 <span id="teamCount" class="miniCount">0</span></h3>
       <div class="teamList" id="teamList"></div>
 
@@ -162,12 +185,6 @@
         <span>找不到？填创建者给的地址（可留空）</span>
         <input id="manualHost" placeholder="https://xxx.trycloudflare.com 或 192.168.1.20:51234" />
       </label>
-      <div class="or"><span>第二台电脑 / 手机设备登录</span></div>
-      <div class="joinRow">
-        <input id="deviceLinkInput" class="deviceInput" placeholder="粘贴创建者发的设备登录链接" autocomplete="off" spellcheck="false" />
-        <button class="secondary" id="btnDeviceLogin">登录</button>
-      </div>
-      <p class="tips">第二台电脑用同一成员身份登录时，粘贴创建者生成的链接；手机直接打开同一个链接即可，只查看当前任务和发布任务。</p>
       <div class="err" id="teamsErr"></div>
 
       <div id="nearbyArea">
@@ -226,6 +243,27 @@
 
       <div class="settingsDivider"></div>
 
+      <h3>地址中继服务</h3>
+      <label class="field tiny">
+        <span>自有中继地址（可留空，留空用默认公共通道）</span>
+        <input id="relayUrlInput" placeholder="https://relay.example.com" autocomplete="off" spellcheck="false" data-no-i18n />
+      </label>
+      <div class="backupRow">
+        <button class="secondary" id="relaySaveBtn">保存中继地址</button>
+      </div>
+      <p class="tips">跨网络协作时，创建者把公网地址登记到这里，成员据此自动重连，避免隧道换址后长时间连不上。留空则用默认公共通道。创建者与所有成员需填同一个地址。</p>
+
+      <div class="settingsDivider"></div>
+
+      <h3>版本与更新</h3>
+      <div class="backupRow">
+        <span class="tips" id="versionText" data-no-i18n>当前版本 —</span>
+        <button class="secondary" id="checkUpdateBtn">检查更新</button>
+      </div>
+      <p class="tips">检查到新版本会提示你前往 GitHub 下载安装包，手动下载安装；不会自动下载或覆盖现有数据。</p>
+
+      <div class="settingsDivider"></div>
+
       <h3>AI 文件整合接口</h3>
       <div class="aiBox" id="aiBox">正在准备 AI 接口…</div>
       <div class="backupRow">
@@ -274,20 +312,35 @@
 
       <div id="deviceBox" class="deviceBox hidden">
         <div class="teamFilesHead">
-          <h3>手机 / 第二台设备</h3>
+          <h3>设备码</h3>
           <button class="miniBtn" id="btnDeviceLink">生成登录链接</button>
         </div>
-        <p class="tips">每个成员一个长期设备码；只有创建者能查看、编辑、重置。设备码登录的是这位成员本人，不会新增成员。</p>
-        <label class="field tiny">
-          <span>成员</span>
-          <select id="deviceMember"></select>
-        </label>
-        <div class="deviceCodeRow">
-          <input id="deviceCodeInput" maxlength="6" placeholder="6 位设备码" autocomplete="off" spellcheck="false" />
-          <button class="secondary" id="btnDeviceSave">保存</button>
-          <button class="secondary" id="btnDeviceReset">重置</button>
+        <div class="segBtns deviceKindSeg" id="deviceKindSeg">
+          <button class="segBtn on" data-kind="member">成员码（可操作）</button>
+          <button class="segBtn" data-kind="viewer">查看者码（只读）</button>
         </div>
-        <p class="tips" id="deviceCodeHint">手机端只查看当前任务和发布任务，不显示文件。</p>
+        <div id="deviceMemberPart">
+          <p class="tips">每个成员一个长期设备码；登录的是这位成员本人，可查看、勾选和发布任务。</p>
+          <label class="field tiny">
+            <span>成员</span>
+            <select id="deviceMember"></select>
+          </label>
+          <div class="deviceCodeRow">
+            <input id="deviceCodeInput" maxlength="6" placeholder="6 位设备码" autocomplete="off" spellcheck="false" />
+            <button class="secondary" id="btnDeviceSave">保存</button>
+            <button class="secondary" id="btnDeviceReset">重置</button>
+          </div>
+          <p class="tips" id="deviceCodeHint">设备码长期有效；只有创建者能看和改，重置后旧码立即失效。</p>
+        </div>
+        <div id="deviceViewerPart" class="hidden">
+          <p class="tips">查看者用这个码进来，能看到本团队的全部任务、详情和文件，但不能发布、勾选或修改任何内容。</p>
+          <div class="deviceCodeRow">
+            <input id="viewerCodeInput" maxlength="6" placeholder="6 位查看者码" autocomplete="off" spellcheck="false" />
+            <button class="secondary" id="btnViewerSave">保存</button>
+            <button class="secondary" id="btnViewerReset">重置</button>
+          </div>
+          <p class="tips" id="viewerCodeHint">查看者码长期有效；重置后旧码和旧链接立即失效。</p>
+        </div>
         <div class="deviceLinkText" id="deviceLinkText">还没有生成登录链接</div>
         <div class="rowBtns">
           <button class="secondary" id="btnDeviceCopy" disabled>复制链接</button>
@@ -434,20 +487,6 @@
     <div class="card noticeEditCard taskEditCard">
       <button class="cardClose" id="taskEditClose">✕</button>
       <h2 id="taskEditTitle">编辑任务</h2>
-      <div class="taskProgressBox" id="taskProgressBox">
-        <div class="progressHead">
-          <span id="taskProgressLabel">任务进度</span>
-          <b id="taskProgressValue">0%</b>
-        </div>
-        <input type="range" id="taskProgressRange" min="0" max="100" step="5" value="0" />
-        <div class="progressScale" id="taskProgressScale"><span>0%</span><span>50%</span><span>100%</span></div>
-        <div class="progressOverall hidden" id="taskProgressOverall">总进度 <b id="taskProgressOverallValue">0%</b></div>
-        <div class="progressMembers" id="taskProgressMembers"></div>
-        <p class="tips" id="taskProgressHint"></p>
-        <div class="progressSubmitRow hidden" id="progressSubmitRow">
-          <button class="ghost tinyBtn" id="progressSubmitBtn">完成并提交给创建者</button>
-        </div>
-      </div>
       <div class="noticeEditorBox">
         <div class="noticeEditorHint">任务内容（可以多行，保存后按原样显示）</div>
         <textarea id="taskEditText" autocomplete="off"></textarea>
@@ -462,8 +501,13 @@
           <b id="taskFileName"></b>
           <button class="ghost tinyBtn" id="taskFileOpen">打开 / 编辑</button>
           <button class="ghost tinyBtn" id="taskFileUpload">上传新版本</button>
+          <button class="ghost tinyBtn" id="taskFileFolder">打开文件夹</button>
         </div>
+        <div class="memberFiles" id="taskMemberFiles"></div>
         <p class="tips" id="taskFileHint"></p>
+      </div>
+      <div class="taskSubmitRow hidden" id="taskSubmitRow">
+        <button class="ghost tinyBtn" id="taskSubmitBtn">完成并提交给创建者</button>
       </div>
       <div class="taskEditLinkBlock" id="taskEditLinkBlock">
         <div class="taskEditLinkBar">
@@ -565,6 +609,7 @@
     <div class="card confirmCard">
       <h2 id="confirmTitle">确认</h2>
       <p class="confirmBody" id="confirmBody"></p>
+      <textarea id="confirmNote" class="confirmNote hidden" rows="3" maxlength="500" placeholder="可填写汇总要求，例如：按报价对比合并、只汇总某几个字段…"></textarea>
       <div class="rowBtns confirmBtns">
         <button class="ghost" id="confirmCancel">取消</button>
         <button class="primary" id="confirmOk">确定</button>

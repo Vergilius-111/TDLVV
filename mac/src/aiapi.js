@@ -46,7 +46,7 @@ function startAiApi(opts) {
         ok: true,
         schema: {
           team: ['id', 'name', 'kind', 'members[]', 'templates[]', 'filesRoot'],
-          task: ['id', 'text', 'fields[]', 'audience', 'assigneeId', 'dueAt', 'done', 'progressBy{}', 'file', 'pendingFile', 'memberFiles{}'],
+          task: ['id', 'text', 'fields[]', 'audience', 'assigneeId', 'assigneeIds[]', 'dueAt', 'done', 'file', 'pendingFile', 'memberFiles{}'],
           file: ['displayName', 'storedRel', 'root', 'size', 'version', 'uploadedById', 'uploadedByName', 'path']
         }
       });
@@ -73,11 +73,11 @@ function startAiApi(opts) {
             text: t.text,
             fields: t.fields || [],
             assigneeId: t.assigneeId || '',
+            assigneeIds: t.assigneeIds || (t.assigneeId ? [t.assigneeId] : []),
             creatorId: t.creatorId || '',
             dueAt: t.dueAt || 0,
             done: !!t.done,
             closed: !!t.closed,
-            progressBy: t.progressBy || {},
             file: publicFile(t.file, o.resolveFile, (team.state && team.state.filesRoot) || team.filesRoot),
             pendingFile: publicFile(t.pendingFile, o.resolveFile, (team.state && team.state.filesRoot) || team.filesRoot),
             memberFiles: Object.fromEntries(Object.entries(t.memberFiles || {}).map(([id, meta]) => [

@@ -26,22 +26,29 @@ function add(state, text, extra, actor) {
   return action.createdId;
 }
 
-function testProgress() {
+function testAssignMulti() {
   const local = store.createBoard({ kind: 'local', name: '个人', ownerName: '我' });
   const id = add(local, '写周报', {}, 'me');
-  storageApply(local, { type: 'setTaskProgress', id, value: 60 }, 'me');
-  assert.strictEqual(local.tasks[0].progressBy.me.value, 60);
-  storageApply(local, { type: 'setTaskProgress', id, value: 100 }, 'me');
+  storageApply(local, { type: 'toggleTask', id }, 'me');
   assert.strictEqual(local.tasks[0].done, true);
   assert.ok(local.tasks[0].doneAt > 0);
 
   const { state, member } = makeTeam();
-  const tid = add(state, '团队设计稿', { assigneeId: member.id }, store.HOST_ID);
-  storageApply(state, { type: 'setTaskProgress', id: tid, value: 80 }, member.id);
-  assert.strictEqual(state.tasks[0].progressBy[member.id].value, 80);
-  storageApply(state, { type: 'setTaskProgress', id: tid, value: 30, memberId: store.HOST_ID }, store.HOST_ID);
-  assert.strictEqual(state.tasks[0].progressBy[store.HOST_ID].value, 30);
-  console.log('✓ 进度：个人 100% 自动完成；成员改自己进度；管理员可改成员进度');
+  const member2 = store.addMember(state, '小王', '🐱');
+  const tid = add(state, '团队设计稿', { assigneeIds: [member.id, member2.id] }, store.HOST_ID);
+  assert.deepStrictEqual(state.tasks[0].assigneeIds, [member.id, member2.id]);
+  assert.strictEqual(state.tasks[0].assigneeId, member.id);
+  // 任一被指派成员都能标记完成
+  storageApply(state, { type: 'toggleTask', id: tid }, member2.id);
+  assert.strictEqual(state.tasks[0].done, true);
+  // 未被指派的成员不能标记完成
+  const outsider = store.addMember(state, '外人', '🐰');
+  const tid2 = add(state, '另一个任务', { assigneeIds: [member.id] }, store.HOST_ID);
+  assert.throws(
+    () => storageApply(state, { type: 'toggleTask', id: tid2 }, outsider.id),
+    /只有创建者、管理员，或被指派的成员能标记完成/
+  );
+  console.log('✓ 多选指派：可指派多人；任一被指派成员可完成；无关成员被拒');
 }
 
 function storageApply(state, action, actor) {
@@ -267,6 +274,12 @@ function testAssignPermissions() {
   );
   assert.strictEqual(state.tasks[0].assigneeId, member.id, '成员越权改指派必须失败且不改数据');
 
+  // 可一次勾选多名成员；旧的单值写法仍然兼容
+  storageApply(state, { type: 'editTask', id: tid, assigneeIds: [member.id, store.HOST_ID] }, store.HOST_ID);
+  assert.deepStrictEqual(state.tasks[0].assigneeIds, [member.id, store.HOST_ID]);
+  storageApply(state, { type: 'editTask', id: tid, assigneeId: member.id }, store.HOST_ID);
+  assert.deepStrictEqual(state.tasks[0].assigneeIds, [member.id]);
+
   // 指派对象必须真实存在
   assert.throws(
     () => storageApply(state, { type: 'editTask', id: tid, assigneeId: 'nobody' }, store.HOST_ID),
@@ -317,7 +330,7 @@ async function testAiApi() {
 }
 
 (async () => {
-  testProgress();
+  testAssignMulti();
   testAssignPermissions();
   testRenameBoard();
   testTemplateCapAndNoticeClear();

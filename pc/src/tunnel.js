@@ -6,9 +6,20 @@ const path = require('path');
 
 function binaryPath() {
   const candidates = [];
-  if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, 'cloudflared.exe'));
-  candidates.push(path.join(__dirname, '..', 'bin', 'cloudflared.exe'));
-  candidates.push(path.join(__dirname, '..', 'bin', 'cloudflared'));
+  const res = process.resourcesPath ? process.resourcesPath : '';
+  const macName = process.arch === 'arm64' ? 'cloudflared-mac-arm64' : 'cloudflared-mac-x64';
+  if (process.platform === 'darwin') {
+    if (res) {
+      candidates.push(path.join(res, macName));
+      candidates.push(path.join(res, 'cloudflared'));
+    }
+    candidates.push(path.join(__dirname, '..', 'bin', macName));
+    candidates.push(path.join(__dirname, '..', 'bin', 'cloudflared'));
+  } else {
+    if (res) candidates.push(path.join(res, 'cloudflared.exe'));
+    candidates.push(path.join(__dirname, '..', 'bin', 'cloudflared.exe'));
+    candidates.push(path.join(__dirname, '..', 'bin', 'cloudflared'));
+  }
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) return p;

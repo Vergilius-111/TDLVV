@@ -1,6 +1,7 @@
 'use strict';
 // 数据模型 + 所有状态变更都收敛到这里（v3：多团队 / 角色 / 截止与提醒 / 头像）
 const crypto = require('crypto');
+const files = require('./files');
 
 const CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // 去掉易混字符 0/O/1/I
 const MEMBER_COLORS = ['#E57373', '#4DB6AC', '#7986CB', '#FFB74D', '#4FC3F7', '#AED581', '#BA68C8', '#FF8A65'];
@@ -12,6 +13,8 @@ const AVATARS = [
 const HOST_ID = 'host';
 const MAX_REMIND_HOURS = 48;
 const INVITE_TTL_MS = 10 * 60 * 1000;
+// 成员超过这个时间没有任何心跳（state/mobile-state 轮询），静默判定为离线
+const PRESENCE_OFFLINE_MS = 45000;
 
 function rid(n = 6) {
   return crypto.randomBytes(16).toString('hex').slice(0, n);
@@ -70,8 +73,37 @@ function createBoard(opts) {
     pending: [],
     notices: [],
     templates: [],
-    tasks: []
+    tasks: [],
+    leftMembers: []
   };
+}
+
+/**
+ * 静默扫描成员在群状态：超过阈值没心跳的成员标记为离线。
+ * 只改 online 字段并返回是否有变化；创建者自己（owner）恒在线。
+ * 调用方据此提升 rev / 推送界面。
+ */
+function expirePresence(state, now = Date.now(), offlineMs = PRESENCE_OFFLINE_MS) {
+  let changed = false;
+  (state.members || []).forEach((m) => {
+    if (m.role === 'owner') {
+      if (m.online !== true) { m.online = true; changed = true; }
+      return;
+    }
+    const stale = now - (Number(m.lastSeen) || 0) > offlineMs;
+    if (stale && m.online !== false) { m.online = false; changed = true; }
+    else if (!stale && m.online !== true) { m.online = true; changed = true; }
+  });
+  return changed;
+}
+
+/** 统一的三态判定：我 / 在线 / 离线 / 已退出（leftMembers 里有同 id 记录） */
+function memberPresence(state, member, meId, now = Date.now(), offlineMs = PRESENCE_OFFLINE_MS) {
+  if (!member) return 'left';
+  if (member.id === meId) return 'me';
+  if (member.role === 'owner') return 'online';
+  if (member.online === false || now - (Number(member.lastSeen) || 0) > offlineMs) return 'offline';
+  return 'online';
 }
 
 /** 对外显示的名字：优先备注 */
@@ -134,10 +166,11 @@ function addMember(state, name, avatar) {
 
 function touch(state, memberId) {
   const m = state.members.find((x) => x.id === memberId);
-  if (m) {
-    m.lastSeen = Date.now();
-    m.online = true;
-  }
+  if (!m) return false;
+  const wasOffline = m.online === false;
+  m.lastSeen = Date.now();
+  m.online = true;
+  return wasOffline; // 从离线恢复上线：调用方可据此推送状态变化
 }
 
 function clampHours(h) {
@@ -247,14 +280,14 @@ function memberFile(task, memberId) {
   return task.memberFiles[memberId] || null;
 }
 
-function progressOf(value) {
-  return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-}
-
-/** 某条任务对某个成员的总进度显示：自己/指定成员的值 */
-function taskProgressValue(task, memberId) {
-  const p = task && task.progressBy && task.progressBy[memberId];
-  return p ? progressOf(p.value) : 0;
+/** 任务的指派成员列表：新数据用 assigneeIds，旧数据的单个 assigneeId 自动兼容 */
+function assigneeIdsOf(task) {
+  if (!task) return [];
+  const out = [];
+  const push = (id) => { if (id && !out.includes(id)) out.push(id); };
+  if (Array.isArray(task.assigneeIds)) task.assigneeIds.forEach(push);
+  else if (task.assigneeId) push(task.assigneeId);
+  return out;
 }
 
 
@@ -340,16 +373,24 @@ function apply(state, action, actorId) {
       const fields = normalizeFields(action.fields);
       const newId = rid(8);
       action.createdId = newId;
-      // 个人清单里的任务没有指派概念，只有团队任务才允许带指派对象
-      let assigneeId = '';
-      if (state.kind !== 'local' && action.assigneeId) {
-        if (!memberById(state, action.assigneeId)) throw new Error('指派对象不存在');
-        assigneeId = action.assigneeId;
+      // 个人清单里的任务没有指派概念，只有团队任务才允许带指派对象（可多选）
+      const assigneeIds = [];
+      if (state.kind !== 'local') {
+        const raw = Array.isArray(action.assigneeIds)
+          ? action.assigneeIds
+          : (action.assigneeId ? [action.assigneeId] : []);
+        raw.forEach((id) => {
+          if (!id || assigneeIds.includes(id)) return;
+          if (!memberById(state, id)) throw new Error('指派对象不存在');
+          if (!visibleTo(state, { audience }, id)) throw new Error('这个成员看不到这条任务');
+          assigneeIds.push(id);
+        });
       }
       state.tasks.unshift({
         id: newId,
         text,
-        assigneeId,
+        assigneeIds: assigneeIds.slice(),
+        assigneeId: assigneeIds[0] || '',
         creatorId: actorId,
         createdAt: Date.now(),
         done: false,
@@ -370,11 +411,24 @@ function apply(state, action, actorId) {
         linkType: link.linkType,
         linkTarget: link.linkTarget,
         fields,
-        progressBy: {},
+        personalDoneBy: {},
+        folderRel: files.taskFolderRel(state.boardId, text, newId),
         file: null,
         pendingFile: null,
         memberFiles: {}
       });
+      break;
+    }
+    /** 个人页面的打勾：只记自己的完成时间，不改团队任务的整体状态 */
+    case 'togglePersonalDone': {
+      const t = findTask(state, action.id);
+      if (!t) return false;
+      const me = memberById(state, actorId);
+      if (!me) throw new Error('找不到当前成员');
+      if (!visibleTo(state, t, actorId)) throw new Error('你看不到这条任务');
+      if (!t.personalDoneBy || typeof t.personalDoneBy !== 'object') t.personalDoneBy = {};
+      if (t.personalDoneBy[actorId]) delete t.personalDoneBy[actorId];
+      else t.personalDoneBy[actorId] = Date.now();
       break;
     }
     case 'toggleTask': {
@@ -382,7 +436,7 @@ function apply(state, action, actorId) {
       if (!t) return false;
       if (state.kind !== 'local') {
         const me = memberById(state, actorId);
-        const own = !!me && t.assigneeId && t.assigneeId === actorId;
+        const own = !!me && assigneeIdsOf(t).includes(actorId);
         if (!isManager(me && me.role) && !own) {
           throw new Error('只有创建者、管理员，或被指派的成员能标记完成');
         }
@@ -402,34 +456,6 @@ function apply(state, action, actorId) {
       const open = Math.max(0, Math.min(total, Math.floor(Number(action.open) || 0)));
       if (me.stats && me.stats.total === total && me.stats.open === open) return false;
       me.stats = { total, open, at: Date.now() };
-      break;
-    }
-    case 'setTaskProgress': {
-      const t = findTask(state, action.id);
-      if (!t) return false;
-      let target = state.kind === 'local' ? 'me' : actorId;
-      if (state.kind !== 'local' && action.memberId && action.memberId !== actorId) {
-        requireManager(state, actorId, '只有创建者或管理员能改别人的进度');
-        target = action.memberId;
-      }
-      const m = memberById(state, target);
-      if (state.kind !== 'local' && !m) throw new Error('成员不存在');
-      const value = progressOf(action.value);
-      if (!t.progressBy) t.progressBy = {};
-      const prev = t.progressBy[target];
-      if (prev && prev.value === value) return false;
-      t.progressBy[target] = {
-        value,
-        at: Date.now(),
-        byName: m ? displayName(m) : ''
-      };
-      if (state.kind === 'local' && value >= 100) {
-        t.done = true;
-        t.doneAt = Date.now();
-        t.doneById = target;
-        t.doneByName = m ? displayName(m) : '';
-        t.remindAt = 0;
-      }
       break;
     }
     case 'acceptFileUpdate': {
@@ -487,16 +513,24 @@ function apply(state, action, actorId) {
         if (!text) return false;
         t.text = text;
       }
-      if (typeof action.assigneeId === 'string') {
+      if (Array.isArray(action.assigneeIds) || typeof action.assigneeId === 'string') {
         // 个人清单没有指派；团队指派只有任务发起人或管理员能做，且对象必须能看到这条任务
         if (state.kind !== 'local') {
           requireTaskEditor(state, t, actorId, '只有任务发起人或管理员能指派任务');
-          const want = action.assigneeId;
-          if (want) {
-            if (!memberById(state, want)) throw new Error('指派对象不存在');
-            if (!visibleTo(state, t, want)) throw new Error('这个成员看不到这条任务');
+          const raw = Array.isArray(action.assigneeIds)
+            ? action.assigneeIds
+            : (action.assigneeId ? [action.assigneeId] : []);
+          const want = [];
+          raw.forEach((id) => {
+            if (!id || want.includes(id)) return;
+            if (!memberById(state, id)) throw new Error('指派对象不存在');
+            if (!visibleTo(state, t, id)) throw new Error('这个成员看不到这条任务');
+            want.push(id);
+          });
+          if (JSON.stringify(assigneeIdsOf(t)) !== JSON.stringify(want)) {
+            t.assigneeIds = want;
+            t.assigneeId = want[0] || '';
           }
-          if (t.assigneeId !== want) t.assigneeId = want;
         }
       }
       if (action.linkType !== undefined) {
@@ -652,6 +686,20 @@ function apply(state, action, actorId) {
       const idx = state.members.findIndex((m) => m.id === action.id);
       if (idx < 0) return false;
       if (state.members[idx].role === 'owner') throw new Error('创建者不能被移除，只能先移交');
+      const removed = state.members[idx];
+      // 留一条退出记录，让创建者能看到「某某已退出/被移除」，而不是凭空消失
+      if (!Array.isArray(state.leftMembers)) state.leftMembers = [];
+      if (!state.leftMembers.some((x) => x.id === removed.id)) {
+        state.leftMembers.push({
+          id: removed.id,
+          name: removed.name || '',
+          remark: removed.remark || '',
+          avatar: removed.avatar || '',
+          role: removed.role || 'member',
+          roleTag: removed.roleTag || '',
+          leftAt: Date.now()
+        });
+      }
       state.members.splice(idx, 1);
       break;
     }
@@ -675,6 +723,9 @@ function apply(state, action, actorId) {
 module.exports = {
   AVATARS,
   HOST_ID,
+  PRESENCE_OFFLINE_MS,
+  expirePresence,
+  memberPresence,
   rid,
   makeInviteCode,
   issueInvite,
@@ -696,7 +747,7 @@ module.exports = {
   attachFile,
   attachMemberFile,
   memberFile,
-  taskProgressValue,
+  assigneeIdsOf,
   visibleTo,
   clampHours,
   computeRemindAt

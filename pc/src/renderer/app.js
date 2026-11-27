@@ -5,30 +5,32 @@ const api = window.api;
 const el = {};
 [
   'app','brandBtn','brandName','brandGear','myAvatarMini','subTitle','btnAddTeam','btnPin','reqBadge','btnMin','btnClose',
-  'teamTabs','banner','tasks','doneBar','doneCount','addBar','targetChip','audienceChip','dueBtn','newTask','btnAddTask',
+  'teamTabs','banner','tasks','doneBar','doneCount','addBar','targetChip','audienceChip','dueBtn','newTask','btnAddTask','btnMiniNow',
   'linkEditor','linkEditorTitle','linkEditorHint','linkEditorClose','linkInput','linkClear','linkSave','linkUrlBtn','linkPathBtn','fileChip','templateBtn',
   'noticeBar','noticeTeamName','btnNotice','btnInvite','noticeList','noticePanel','noticeClose','noticeText','noticeSave','noticeTitle',
   'taskEditPanel','taskEditClose','taskEditText','taskEditCancel','taskEditSave','taskEditTitle',
   'taskEditLinkUrl','taskEditLinkPath','taskEditLinkClear','taskEditLinkStatus','taskEditLinkRow','taskEditLinkInput','taskEditLinkOk','taskEditLinkLabel','taskEditLinkBlock',
-  'taskProgressBox','taskProgressLabel','taskProgressValue','taskProgressScale','taskProgressRange','taskProgressOverall','taskProgressOverallValue','taskProgressMembers','taskProgressHint','progressSubmitRow','progressSubmitBtn','taskFieldsBox','taskFieldsList','taskFileBox','taskFileName','taskFileHint','taskFileOpen','taskFileUpload',
+  'taskSubmitRow','taskSubmitBtn','taskFieldsBox','taskFieldsList','taskFileBox','taskFileName','taskFileHint','taskFileOpen','taskFileUpload','taskFileFolder','taskMemberFiles',
   'attachPanel','attachClose','attachTitle','attachSub','attachDrop','attachInput','attachInfo','attachSave','attachCancel','attachPick',
   'templatePanel','templateClose','templateName','templateRows','templateAddRow','templateSaved','templateCount','templateNew','templateSave','templateCancel',
   'noticeView','noticeViewClose','noticeViewBody','noticeViewMeta',
   'invitePanel','inviteClose','inviteTitle','inviteSub','inviteCodeLine','inviteCodeTimer','inviteCopy','inviteRegen','inviteNetBox',
   'namePanel','nameAvatar','avatarGrid','nameInput','btnNameOk',
   'teamsPanel','teamsClose','profileAvatar','profileAvatarPick','myNameInput','saveName','themeSeg','fontSeg','langSeg','autoStartChk','notifyTaskChk','notifyDueChk',
-  'exportDataBtn','importDataBtn','aiBox','aiCopyBtn',
+  'exportDataBtn','importDataBtn','aiBox','aiCopyBtn','versionText','checkUpdateBtn','relayUrlInput','relaySaveBtn',
   'teamCount','teamList','boardNameInput','btnCreate','codeInput','btnJoin','manualHost','teamsErr','nearbyArea','nearbyList',
   'teamFilesPath','teamFilesPick','teamFilesTip',
   'teamPanel','teamClose','teamTitle','teamNameEdit','teamNameInput','teamNameSave','teamMeta','teamFilesBox','teamFilesPathLabel','teamFilesOpen','teamFilesChange','teamFilesNote','inviteBox','codeLine','codeTimer','btnCopy','btnRegen','netBox',
-  'deviceBox','btnDeviceLink','deviceLinkText','btnDeviceCopy','deviceLinkNote','deviceLinkInput','btnDeviceLogin',
+  'deviceBox','btnDeviceLink','deviceLinkText','btnDeviceCopy','deviceLinkNote','deviceKindSeg','deviceMemberPart','deviceViewerPart',
   'deviceMember','deviceCodeInput','btnDeviceSave','btnDeviceReset','deviceCodeHint',
+  'viewerCodeInput','btnViewerSave','btnViewerReset','viewerCodeHint',
+  'portalCodeInput','btnPortalGen','btnPortalReset','portalLinkText','btnPortalCopy','portalHint',
   'reqArea','reqCount','reqList','memberCount','memberRows','memberProgress','membersTip','btnLeave',
   'memberStatsPanel','memberStatsClose','memberStatsAvatar','memberStatsName','memberStatsSub','memberStatsTotal','memberStatsTotalSub','memberStatsTeam','memberStatsTeamSub','memberStatsHint',
   'donePanel','doneClose','doneTotal','doneSearch','clearSearch','doneAll',
   'duePanel','dueClose','dueTime','clearDue','remindList','dueCancel','dueSave',
   'dueMain','duePickerView','dueCalBtn','calPrev','calNext','calMonth','calWeekdays','calGrid','datePreview','hourWheel','minuteWheel','dateCancel','dateOk',
-  'confirmPanel','confirmTitle','confirmBody','confirmCancel','confirmOk',
+  'confirmPanel','confirmTitle','confirmBody','confirmNote','confirmCancel','confirmOk',
   'waitPanel','waitSub','btnCancelWait','menu','toast'
 ].forEach((id) => { el[id] = document.getElementById(id); });
 
@@ -45,7 +47,9 @@ let doneQuery = '';
 let openTeamId = null;
 const deviceCodes = new Map(); // teamId -> {members, meId}
 const deviceSelected = new Map(); // teamId -> memberId
-const deviceLinks = new Map(); // `${teamId}:${memberId}` -> {url,code,network,base}
+const deviceLinks = new Map(); // `${teamId}:${key}` -> {url,code,network,base}
+const viewerCodes = new Map(); // teamId -> code
+let deviceKind = 'member'; // 'member' | 'viewer'
 let deviceCodeTeamId = '';
 let openMemberTeamId = '';
 let openMemberId = '';
@@ -55,8 +59,6 @@ let attachDraft = null; // 弹窗里已选择的文件
 let attachUseCurrent = false; // 提交模式：默认提交当前这份，不重新选文件
 let pendingTemplate = null; // 当前发布任务使用的模板 {id,name,fields}
 let templateDraft = null;
-let taskEditProgress = 0;
-let taskEditOwnProgress = 0;
 const promptedFileUpdates = new Set();
 let toastTimer = null;
 let noticeEditId = '';
@@ -100,15 +102,21 @@ let miniTasksOffset = 1;   // 小条布局里任务区离窗口顶部的距离�
 let miniTopDev = 0;         // 收/展开时窗口上边要收进来多少（设备像素）
 let miniTargetDev = 0;      // 收起之后小条窗口的高度（设备像素），展开时从这个高度长回去
 let collapseTimer = null;
+let expandTimer = null;   // 小条移入后的延迟展开，给按住拖动留时间
+let dragExpanding = false; // 正在从小条拖动时，不自动展开
 let restOnce = false;
 let hoverInside = false;
+let windowFocused = true;   // 窗口是否处于焦点；失焦时即使鼠标还在窗口内也要自动收成小条
 let restSuppressUntil = 0;
+let expandSuppressUntil = 0;  // 手动收成迷你条后短暂禁止 hover 自动展开，避免鼠标还压在原位置就立刻弹回
+let awaySince = 0;            // 鼠标离开主界面的起始时间，用于「离开满 3 秒自动收起」的兜底心跳
 let windowResizing = false;
 let edgeHover = false;
 let edgeLeaveTimer = null;
 let resizeSettleTimer = null;
 let inviteClock = null;
 let confirmResolver = null;
+let confirmDefaultOk = false;
 const lastStatsSig = new Map();
 
 /* ---------------- 工具 ---------------- */
@@ -149,6 +157,25 @@ function dueState(ts) {
 }
 function nameOf(m) { return m ? ((m.remark && m.remark.trim()) || m.name) : ''; }
 function avatarOf(m) { return (m && m.avatar) || '👤'; }
+const PRESENCE_OFFLINE_MS = 45000;
+/**
+ * 静默检测成员在群状态：me / online / offline / left（已退出或被移除）。
+ * 用 m.online（服务端定时扫描写入）+ lastSeen 双重判定，创建者恒在线。
+ */
+function memberPresence(team, m) {
+  if (!m || m._left) return 'left';
+  if (m.id === team.meId) return 'me';
+  if (m.role === 'owner') return 'online';
+  if (m.online === false || Date.now() - (Number(m.lastSeen) || 0) > PRESENCE_OFFLINE_MS) return 'offline';
+  return 'online';
+}
+/** 已退出成员的身份标签文字（走 i18n） */
+function presenceLabel(p) {
+  if (p === 'me') return trText('我');
+  if (p === 'online') return trText('在线');
+  if (p === 'offline') return trText('离线');
+  return trText('已退出');
+}
 function esc(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
@@ -201,6 +228,7 @@ function settleConfirm(ok) {
   if (!confirmResolver) return;
   const resolve = confirmResolver;
   confirmResolver = null;
+  confirmDefaultOk = false;
   el.confirmPanel.classList.add('hidden');
   resolve(!!ok);
 }
@@ -213,15 +241,50 @@ function askConfirm(msg, opts) {
   if (confirmResolver) settleConfirm(false);
   clearTimeout(collapseTimer);
   const o = opts || {};
+  confirmDefaultOk = !!o.defaultOk;
   el.confirmTitle.textContent = trText(o.title || '确认');
   el.confirmBody.textContent = String(msg == null ? '' : msg);
   el.confirmOk.textContent = trText(o.okText || '确定');
+  el.confirmCancel.textContent = trText(o.cancelText || '取消');
   el.confirmOk.classList.toggle('dangerSolid', !!o.danger);
+  // 可选说明输入框：只在 opts.note 为真时显示，返回 { ok, note }
+  const withNote = !!o.note;
+  el.confirmNote.classList.toggle('hidden', !withNote);
+  if (withNote) {
+    el.confirmNote.value = String(o.noteValue || '');
+    el.confirmNote.placeholder = trText(o.notePlaceholder || '可补充说明…');
+  }
   el.confirmPanel.classList.remove('hidden');
+  // defaultOk：默认焦点落在「确认」按钮（Enter 即确认）；否则落在「取消」（危险操作防误触）
+  const focusTarget = withNote ? el.confirmNote : (o.defaultOk ? el.confirmOk : el.confirmCancel);
   setTimeout(() => {
-    try { el.confirmCancel.focus({ preventScroll: true }); } catch (e) { el.confirmCancel.focus(); }
+    try { focusTarget.focus({ preventScroll: true }); } catch (e) { focusTarget.focus(); }
   }, 40);
-  return new Promise((resolve) => { confirmResolver = resolve; });
+  return new Promise((resolve) => {
+    confirmResolver = (ok) => resolve(withNote ? { ok, note: el.confirmNote.value.trim() } : ok);
+  });
+}
+/** 发现新版本时的统一弹窗：确认后打开下载页；无论选什么都记住该版本，避免反复打扰 */
+async function offerUpdate(info, manual) {
+  if (!info || !info.ok) {
+    if (manual) toast(trText('检查失败，请稍后重试'));
+    return;
+  }
+  if (!info.available) {
+    if (manual) toast(`${trText('已是最新版本')} ${info.current || ''}`);
+    return;
+  }
+  const notes = info.notes ? `\n\n${info.notes}` : '';
+  const body = `${trText('发现新版本')} ${info.latest}${info.current ? `（${trText('当前版本')} ${info.current}）` : ''}。${trText('是否前往下载页面手动安装？')}${notes}`;
+  if (miniMode) setMini(false);
+  const ok = await askConfirm(body, {
+    title: trText('发现新版本'),
+    okText: trText('前往下载'),
+    cancelText: trText('稍后'),
+    defaultOk: true
+  });
+  try { await api.markUpdateSeen(info.latest); } catch (e) { /* ignore */ }
+  if (ok && info.url) api.open(info.url);
 }
 function focusComposer() {
   if (!el.newTask || miniMode) return;
@@ -232,6 +295,15 @@ function teamById(id) { return teams().find((t) => t.id === id) || null; }
 function localTeam() { return teams().find((t) => t.kind === 'local') || null; }
 function activeTeam() {
   return teamById(S && S.activeId) || localTeam() || teams()[0] || null;
+}
+/** 「我的任务」汇总视图；团队视图仍按团队整体完成状态显示 */
+function isPersonalView() {
+  const at = activeTeam();
+  return !at || at.kind === 'local';
+}
+function myPersonalDone(t, team) {
+  if (!t || !team || !t.personalDoneBy) return 0;
+  return Number(t.personalDoneBy[team.meId]) || 0;
 }
 function roleTagsOf(team) {
   const st = team && team.state;
@@ -272,6 +344,32 @@ function audienceLabel(a) {
   if (a.type === 'roles') return `按角色：${(a.roles || []).join(' / ')}`;
   return `部分 ${ (a.memberIds || []).length } 人`;
 }
+/**
+ * 团队任务的「个人打勾」统计：应完成人数 = 指派成员（没指派则全员），
+ * 已完成人数 = 其中已在个人页打勾的人。用于创建者/管理员在任务面板看到 3/5 进度。
+ */
+function personalDoneStat(team, t, members) {
+  if (!team || team.kind === 'local' || !t) return null;
+  const all = (members || team.state && team.state.members || []).filter((m) => m && m.id);
+  const assigned = assigneeIdsOf(t);
+  const a = audienceOf(t);
+  const eligible = all.filter((m) => {
+    if (assigned.length) return assigned.includes(m.id);
+    // 没指派时按发布范围算应完成的人
+    if (a.type === 'members') return a.memberIds.includes(m.id);
+    if (a.type === 'roles') {
+      const tag = String(m.roleTag || '').replace(/^#+/, '').trim();
+      return !!tag && a.roles.includes(tag);
+    }
+    return true;
+  });
+  const total = eligible.length;
+  if (!total) return null;
+  const by = (t.personalDoneBy && typeof t.personalDoneBy === 'object') ? t.personalDoneBy : {};
+  let done = 0;
+  eligible.forEach((m) => { if (by[m.id]) done++; });
+  return { done, total };
+}
 function canManage(team) {
   return !!team && (team.role === 'owner' || team.role === 'admin');
 }
@@ -285,12 +383,24 @@ function taskCreator(team, task) {
 function canEdit(team, task) {
   return canManage(team) || taskCreator(team, task);
 }
+/** 任务的指派成员：新数据用 assigneeIds，兼容旧的单值 assigneeId */
+function assigneeIdsOf(t) {
+  if (!t) return [];
+  const out = [];
+  const push = (id) => { if (id && !out.includes(id)) out.push(id); };
+  if (Array.isArray(t.assigneeIds)) t.assigneeIds.forEach(push);
+  else if (t.assigneeId) push(t.assigneeId);
+  return out;
+}
+
 /** 团队任务只有创建者/管理员、或被指派的本人能标记完成 */
-function canCompleteTask(team, task) {
+function canCompleteTask(team, task, personal) {
   if (!team) return false;
   if (team.kind === 'local') return true;
+  // 个人汇总页允许把自己看到的团队任务单独打勾，不影响团队里其他人
+  if (personal || isPersonalView()) return true;
   if (canManage(team)) return true;
-  return !!task.assigneeId && task.assigneeId === team.meId;
+  return assigneeIdsOf(task).includes(team.meId);
 }
 function taskById(team, id) {
   return team && team.state ? (team.state.tasks || []).find((t) => t.id === id) || null : null;
@@ -535,10 +645,7 @@ async function saveAttachFile() {
   closeAttachPanel();
   await refresh();
   if (submitMode) {
-    // 提交协作文件后，把自己的进度记为 100%（不改动其他人的部分，也不结束整条任务）
-    await act(team.id, 'setTaskProgress', { id: task.id, value: 100 });
-    await refresh();
-    toast('已提交你的文件，你的部分记为 100%');
+    toast('已提交你的文件');
     return;
   }
   toast(isCreator ? '文件已保存' : '已保存到你的个人副本');
@@ -892,7 +999,8 @@ function canRest() {
   if (document.visibilityState === 'hidden') return false;
   if (miniMode) return false;
   if (windowResizing || edgeHover) return false;
-  if (hoverInside) return false;
+  // 失焦（切到别的窗口）时忽略 hoverInside：鼠标可能还停在本窗口内，但用户已经在用别的窗口
+  if (hoverInside && windowFocused) return false;
   if (editingId) return false;
   if (anyPanelOpen()) return false;
   const a = document.activeElement;
@@ -1049,6 +1157,9 @@ function setMini(on) {
     const bDevAll = Math.max(0, hDevAll - tDevAll - targetH);
     miniAppHeight = mh;
     clearExpandAnim();
+    // 小条可被拖到屏幕任意位置：展开前把窗口基准锚到小条当前处，
+    // 主进程再 clamp 到工作区，贴顶/贴底时就会朝屏幕中间展开。
+    if (api.miniAnchor) api.miniAnchor(tDevAll);
     miniMode = false;
     applyTheme();
     renderTasks();
@@ -1070,32 +1181,38 @@ function morphBegin(tDevAll, bDevAll, dir) {
     return;
   }
   const z = (S && S.fontScale) || 1;
-  const dur = 320;
+  // 时长缩短到 240ms：越短每帧窗口要挪的量越集中，但总帧数少，整体更利落；
+  // 配合下面改用的异步 miniFrame，渲染线程不再被同步 IPC 卡住。
+  const dur = 240;
   const t0 = performance.now();
   morphDir = dir;
   document.body.classList.add('morphing');
-  const place = (t, b) => {
-    api.miniStep(t, b);
-    // 卡片高度直接定死成"展开态的高度"，不再依赖 window.innerHeight：
-    // 窗口是异步变的，读到的内高总是差一帧，卡片会比窗口矮十来像素，
-    // 窗口底边就会漏出一条桌面（看起来像闪一下）。
-    el.app.style.top = `${-t / z}px`;
-    el.app.style.bottom = 'auto';
-    el.app.style.height = `${expandedAppHeight}px`;
-  };
-  place(dir === 'in' ? 0 : tDevAll, dir === 'in' ? 0 : bDevAll);
+  // 一次性把动画的基准交给主进程（base/topDev/targetH），之后每帧只发一个进度，
+  // 主进程自己算 bounds。相比旧的逐帧 sendSync + 精确像素，异步 IPC 不会阻塞渲染，
+  // 窗口 resize 与渲染帧解耦后掉帧明显减少。
+  if (api.miniBegin) api.miniBegin(miniHeightForCss(miniAppHeight), tDevAll);
+  // 卡片高度定死成展开态高度：窗口是异步变的，读 window.innerHeight 总会差一帧，
+  // 卡片比窗口矮就会从底边漏出桌面（看起来像闪一下）。
+  el.app.style.top = dir === 'in' ? '0px' : `${-tDevAll / z}px`;
+  el.app.style.bottom = 'auto';
+  el.app.style.height = `${expandedAppHeight}px`;
   document.body.style.setProperty('--morph-op', dir === 'in' ? '1' : '0');
   const tick = (now) => {
     if (morphDir !== dir) return;
     const p = Math.min(1, Math.max(0, (now - t0) / dur));
     // 缓入缓出：起步和收尾都慢，每帧挪的量最小，视觉上没有“顿一下”
     const e = 0.5 - 0.5 * Math.cos(Math.PI * p);
+    // 收起：进度从 0→1（顶边往下收、底边往上收）；展开：从 1→0
     const k = dir === 'in' ? e : 1 - e;
-    const t = Math.min(tDevAll, Math.round(tDevAll * k));
-    const b = Math.min(bDevAll, Math.round(bDevAll * k));
-    place(t, b);
-    // 行内那几个小按钮（勾、指派、删除、电脑/地球）在小条里是隐藏的，
-    // 这里跟着进度淡出淡入，免得切换那一帧突然冒出来/消失
+    if (api.miniFrame) api.miniFrame(k, k);
+    else if (api.miniStep) {
+      const t = Math.min(tDevAll, Math.round(tDevAll * k));
+      const b = Math.min(bDevAll, Math.round(bDevAll * k));
+      api.miniStep(t, b);
+    }
+    // 卡片用同一进度反向位移，抵消窗口顶边移动，字不会跟着窗口上下跳
+    el.app.style.top = `${-(tDevAll * k) / z}px`;
+    // 行内小按钮跟着进度淡出淡入，免得切换那一帧突然冒出来/消失
     document.body.style.setProperty('--morph-op', String(dir === 'in' ? 1 - e : e));
     if (p < 1) collapseRaf = requestAnimationFrame(tick);
     else if (dir === 'in') finishCollapse();
@@ -1118,6 +1235,32 @@ function scheduleRest(delay) {
   collapseTimer = setTimeout(() => {
     if (canRest()) setMini(true);
   }, delay == null ? 600 : delay);
+}
+/**
+ * 兜底心跳：每 500ms 检查一次「鼠标是否不在主界面」，累计离开满 3 秒就收成迷你条。
+ * 原 mouseleave/blur 是一次性事件 + canRest 守卫，某一刻守卫没通过（面板、输入框、
+ * 边缘悬停等）就再也不会重试，导致偶尔「卡住不收」。这里用浏览器维护的 :hover 伪类
+ * 判断鼠标真实位置（JS 的 mouseleave 事件偶尔会丢），绕开一次性定时器做持续兜底。
+ */
+function autoRestTick() {
+  if (!S || miniMode || miniCollapsing || morphDir) { awaySince = 0; return; }
+  // 用户正在明确操作的硬状态：不计时（与 canRest 一致）
+  if (editingId || anyPanelOpen() || windowResizing || dragExpanding) { awaySince = 0; return; }
+  const a = document.activeElement;
+  // 只有窗口有焦点、且焦点在输入框时才算「正在输入」；窗口失焦后 activeElement 可能残留 textarea
+  if (windowFocused && a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) { awaySince = 0; return; }
+  let pointerInside = hoverInside;
+  try { pointerInside = document.body.matches(':hover'); } catch (e) { /* 用 hoverInside 兜底 */ }
+  const away = !windowFocused || !pointerInside;
+  if (!away) { awaySince = 0; return; }
+  if (!awaySince) { awaySince = Date.now(); return; }
+  if (Date.now() - awaySince >= 3000) {
+    awaySince = 0;
+    clearTimeout(collapseTimer);
+    clearTimeout(expandTimer);
+    expandSuppressUntil = Date.now() + 400;
+    setMini(true);
+  }
 }
 
 /* ---------------- 渲染：主界面 ---------------- */
@@ -1154,6 +1297,57 @@ async function maybeAiInstallPrompt() {
       try { el.aiBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ }
     }, 120);
   }
+}
+
+let portalBusy = false;
+
+function renderPortalBox() {
+  if (!el.portalCodeInput) return;
+  const p = S.portal || {};
+  if (document.activeElement !== el.portalCodeInput) {
+    el.portalCodeInput.value = p.code || '';
+    el.portalCodeInput.placeholder = p.code ? '6 位设备码' : '未生成';
+  }
+  if (el.btnPortalGen) el.btnPortalGen.textContent = p.code ? '换一个' : '生成';
+  if (el.portalLinkText) {
+    el.portalLinkText.classList.toggle('ready', !!p.link);
+    el.portalLinkText.textContent = p.link || (p.tunnelState === 'ready' ? '正在生成链接…' : '公网通道未就绪，暂时不能用外网链接');
+  }
+  if (el.btnPortalCopy) el.btnPortalCopy.disabled = !p.link;
+  if (el.portalHint) {
+    el.portalHint.textContent = p.code
+      ? '用手机或浏览器打开这个链接，输入设备码即可看到你的全部任务。换网络或重启后链接可能变化，点「复制链接」取最新的。'
+      : '点「生成」创建你的专属设备码；生成后这台电脑会常驻一个小服务并自动连公网通道。';
+  }
+}
+
+async function genPortalCode() {
+  if (portalBusy) return;
+  if (S.portal && S.portal.code && !(await askConfirm('换一个新的设备码？旧设备码和旧链接会立即失效，已经打开的设备下次刷新就要用新码。', {
+    title: '更换主页设备码？', okText: '换一个', danger: true
+  }))) return;
+  portalBusy = true;
+  try {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    const r = await api.portalSetCode(code);
+    if (r && r.ok) toast('主页设备码已生成，公网通道就绪后即可复制链接');
+  } catch (e) { toast('生成设备码失败'); }
+  finally { portalBusy = false; }
+}
+
+async function resetPortalCode() {
+  if (portalBusy) return;
+  if (!(await askConfirm('重置主页设备码？旧设备码和旧链接立即失效，已经打开的设备下次刷新就要用新码。', {
+    title: '重置主页设备码？', okText: '重置', danger: true
+  }))) return;
+  portalBusy = true;
+  try {
+    await api.portalSetCode('');
+    toast('主页设备码已清除');
+  } catch (e) { toast('重置失败'); }
+  finally { portalBusy = false; }
 }
 
 function render() {
@@ -1219,6 +1413,9 @@ function render() {
   if (el.autoStartChk) el.autoStartChk.checked = !!S.autoStart;
   if (el.notifyTaskChk) el.notifyTaskChk.checked = S.notifyTasks !== false;
   if (el.notifyDueChk) el.notifyDueChk.checked = S.notifyDue !== false;
+  if (el.versionText) el.versionText.textContent = `${trText('当前版本')} ${S.version || ''}`;
+  if (el.relayUrlInput && document.activeElement !== el.relayUrlInput) el.relayUrlInput.value = S.relayUrl || '';
+  renderPortalBox();
   renderAiBox();
   reportMemberStats();
 
@@ -1585,7 +1782,7 @@ function allTaskEntries(onlyDone) {
     if (!st) return;
     (st.tasks || []).forEach((t) => {
       if (!canSeeTask(team, t)) return;
-      const settled = !!(t.done || t.closed);
+      const settled = !!(t.done || t.closed || (isPersonalView() && myPersonalDone(t, team)));
       if (settled !== !!onlyDone) return;
       out.push({ team, t, members: st.members || [] });
     });
@@ -1594,12 +1791,18 @@ function allTaskEntries(onlyDone) {
 }
 
 function settledAt(t) {
-  return t.done ? t.doneAt || 0 : t.closedAt || 0;
+  if (t.closed) return t.closedAt || 0;
+  if (t.done) return t.doneAt || 0;
+  const mine = t.personalDoneBy ? Math.max(0, ...Object.values(t.personalDoneBy).map((v) => Number(v) || 0)) : 0;
+  return mine;
 }
 
 function settledByName(t, members) {
   const by = members.find((m) => m.id === (t.done ? t.doneById : ''));
-  return t.done ? (by ? nameOf(by) : t.doneByName || '') : t.closedByName || '';
+  if (t.done) return by ? nameOf(by) : t.doneByName || '';
+  if (t.closed) return t.closedByName || '';
+  if (t.personalDoneBy && Object.keys(t.personalDoneBy).length) return '我';
+  return '';
 }
 
 function countDone() {
@@ -1680,8 +1883,7 @@ function renderMemberStats() {
   el.memberStatsAvatar.textContent = avatarOf(member);
   el.memberStatsName.textContent = nameOf(member);
   const role = ROLE_LABEL[member.role] || '成员';
-  const online = member.id === team.meId || member.online || Date.now() - (member.lastSeen || 0) < 45000;
-  el.memberStatsSub.textContent = `${trText(role)} · ${trText(online ? '在线' : '离线')}`;
+  el.memberStatsSub.textContent = `${trText(role)} · ${presenceLabel(memberPresence(team, member))}`;
   // 这里只展示两个数量：该成员所有团队的待办总数、本团队的待完成数
   el.memberStatsTotal.textContent = total ? String(total.open) : '—';
   el.memberStatsTotalSub.textContent = total
@@ -1751,10 +1953,10 @@ function renderTasks() {
     const d = document.createElement('div');
     d.className = 'empty';
     d.innerHTML = active && active.kind !== 'local'
-      ? '<span class="k">✦</span>这个团队还没有待办<br>在下面写一条，Ctrl+Enter 发布'
+      ? '<span class="k">✦</span>这个团队还没有待办<br>在下面写一条，Enter 发布'
       : teams().length > 1
-      ? '<span class="k">✦</span>所有团队都没有待办了<br>在下面写一条，Ctrl+Enter 发布'
-      : '<span class="k">✦</span>还没有任务<br>在下面写一条，Ctrl+Enter 发布';
+      ? '<span class="k">✦</span>所有团队都没有待办了<br>在下面写一条，Enter 发布'
+      : '<span class="k">✦</span>还没有任务<br>在下面写一条，Enter 发布';
     el.tasks.appendChild(d);
     el.tasks.scrollTop = scrollTop;
     return;
@@ -1787,8 +1989,8 @@ function taskRow(team, t, members) {
 
   const cb = document.createElement('button');
   cb.className = 'cb';
-  cb.title = '标记完成';
-  if (!canCompleteTask(team, t)) {
+  cb.title = isPersonalView() && team.kind !== 'local' ? '在个人页面标记完成' : '标记完成';
+  if (!canCompleteTask(team, t, isPersonalView())) {
     cb.classList.add('readonly');
     cb.title = '只有创建者、管理员或任务指派对象能标记完成';
     cb.setAttribute('aria-disabled', 'true');
@@ -1831,13 +2033,23 @@ function taskRow(team, t, members) {
     }
   }
 
-  if (t.assigneeId) {
-    const who = members.find((m) => m.id === t.assigneeId);
-    if (who) {
-      const a = document.createElement('span');
-      a.className = 'src';
-      a.textContent = `→ ${nameOf(who)}`;
-      meta.appendChild(a);
+  const assigned = assigneeIdsOf(t).map((id) => members.find((m) => m.id === id)).filter(Boolean);
+  if (assigned.length) {
+    const a = document.createElement('span');
+    a.className = 'src';
+    a.textContent = `→ ${assigned.map(nameOf).join('、')}`;
+    meta.appendChild(a);
+  }
+
+  // 个人打勾进度：让创建者/管理员在任务面板直接看到「3/5 人已完成」
+  if (team.kind !== 'local' && !t.done && !t.closed) {
+    const pds = personalDoneStat(team, t, members);
+    if (pds) {
+      const pd = document.createElement('span');
+      pd.className = 'doneStat' + (pds.done >= pds.total ? ' allDone' : '');
+      pd.textContent = `✅ ${pds.done}/${pds.total} ${trText('人已完成')}`;
+      pd.title = trText('成员在个人页勾选完成的人数 / 应完成人数');
+      meta.appendChild(pd);
     }
   }
 
@@ -1924,11 +2136,12 @@ function taskRow(team, t, members) {
   actions.className = 'taskActions';
 
   if (team.kind !== 'local' && (canManage(team) || taskCreator(team, t))) {
-    const who = t.assigneeId ? members.find((m) => m.id === t.assigneeId) : null;
+    const ids = assigneeIdsOf(t);
+    const names = ids.map((id) => members.find((m) => m.id === id)).filter(Boolean).map(nameOf);
     const chip = document.createElement('button');
-    chip.className = 'assignee' + (who ? '' : ' ghost') + (t.assigneeId && t.assigneeId === team.meId ? ' me' : '');
+    chip.className = 'assignee' + (ids.length ? '' : ' ghost') + (ids.includes(team.meId) ? ' me' : '');
     chip.textContent = '👉';
-    chip.title = who ? `指派给谁（当前：${nameOf(who)}）` : '指派给谁';
+    chip.title = names.length ? `指派给谁（当前：${names.join('、')}）` : '指派给谁';
     chip.setAttribute('aria-label', chip.title);
     actions.appendChild(chip);
   }
@@ -2127,6 +2340,13 @@ function renderDeviceBox(team) {
   el.deviceBox.classList.toggle('hidden', !show);
   if (!show) return;
 
+  if (el.deviceKindSeg) {
+    el.deviceKindSeg.querySelectorAll('.segBtn').forEach((b) => b.classList.toggle('on', b.dataset.kind === deviceKind));
+  }
+  if (el.deviceMemberPart) el.deviceMemberPart.classList.toggle('hidden', deviceKind !== 'member');
+  if (el.deviceViewerPart) el.deviceViewerPart.classList.toggle('hidden', deviceKind !== 'viewer');
+  if (el.btnDeviceLink) el.btnDeviceLink.textContent = deviceKind === 'viewer' ? '生成查看者链接' : '生成登录链接';
+
   const cache = deviceCodes.get(team.id);
   if (!cache) {
     el.deviceMember.innerHTML = '';
@@ -2140,6 +2360,7 @@ function renderDeviceBox(team) {
     el.btnDeviceCopy.disabled = true;
     el.deviceLinkNote.textContent = '';
     loadDeviceCodes(team.id);
+    loadViewerCode(team.id);
     return;
   }
 
@@ -2178,13 +2399,20 @@ function renderDeviceBox(team) {
     ? '设备码长期有效；只有创建者能看和改，重置后旧码立即失效。'
     : '还没有成员。';
 
-  const linkKey = `${team.id}:${selectedId}`;
+  // 查看者码输入框
+  const vcode = viewerCodes.get(team.id) || '';
+  if (el.viewerCodeInput && document.activeElement !== el.viewerCodeInput) el.viewerCodeInput.value = vcode;
+  if (el.viewerCodeHint) el.viewerCodeHint.textContent = vcode ? '查看者码长期有效；重置后旧码和旧链接立即失效。' : '点「生成查看者链接」自动创建一个查看者码。';
+
+  const linkKey = deviceKind === 'viewer' ? `${team.id}:viewer` : `${team.id}:${selectedId}`;
   const link = deviceLinks.get(linkKey);
   if (!link) {
     el.deviceLinkText.classList.remove('ready');
     el.deviceLinkText.textContent = '还没有生成登录链接';
     el.btnDeviceCopy.disabled = true;
-    el.deviceLinkNote.textContent = '选好成员后点「生成登录链接」，手机直接打开链接即可。';
+    el.deviceLinkNote.textContent = deviceKind === 'viewer'
+      ? '点「生成查看者链接」，把链接发给只看不改的人。'
+      : '选好成员后点「生成登录链接」，手机直接打开链接即可。';
     return;
   }
   el.deviceLinkText.classList.add('ready');
@@ -2200,22 +2428,24 @@ function renderDeviceBox(team) {
 async function generateDeviceLink() {
   const team = teamById(openTeamId);
   if (!team || team.kind !== 'host' || team.role !== 'owner') return;
+  const viewer = deviceKind === 'viewer';
   const member = deviceSelectedMember(team.id);
-  if (!member) return toast('先选择成员');
+  if (!viewer && !member) return toast('先选择成员');
   if (el.btnDeviceLink.disabled) return;
   el.btnDeviceLink.disabled = true;
   el.btnDeviceLink.textContent = '生成中…';
   try {
-    const r = await api.deviceLink({ teamId: team.id, memberId: member.id });
+    const r = await api.deviceLink({ teamId: team.id, memberId: member && member.id, kind: viewer ? 'viewer' : 'member' });
     if (!r || !r.ok) {
       toast((r && r.error) || '生成登录链接失败');
       return;
     }
-    deviceLinks.set(`${team.id}:${member.id}`, r);
+    deviceLinks.set(viewer ? `${team.id}:viewer` : `${team.id}:${member.id}`, r);
+    if (viewer && r.code) viewerCodes.set(team.id, r.code);
     renderDeviceBox(team);
     try {
       await api.copy(r.url);
-      toast(r.network === 'tunnel' ? '已生成公网登录链接并复制' : '已生成登录链接并复制（当前仅局域网）');
+      toast(r.network === 'tunnel' ? (viewer ? '已生成公网查看者链接并复制' : '已生成公网登录链接并复制') : '已生成链接并复制（当前仅局域网）');
     } catch (e) {
       toast('登录链接已生成');
     }
@@ -2223,8 +2453,51 @@ async function generateDeviceLink() {
     toast('生成登录链接失败');
   } finally {
     el.btnDeviceLink.disabled = false;
-    el.btnDeviceLink.textContent = '生成登录链接';
+    el.btnDeviceLink.textContent = viewer ? '生成查看者链接' : '生成登录链接';
   }
+}
+
+async function loadViewerCode(teamId) {
+  if (viewerCodes.has(teamId)) return;
+  try {
+    const r = await api.viewerCode(teamId);
+    if (r && r.ok && r.code) {
+      viewerCodes.set(teamId, r.code);
+      const team = teamById(teamId);
+      if (team && openTeamId === teamId && !el.teamPanel.classList.contains('hidden')) renderDeviceBox(team);
+    }
+  } catch (e) { /* 静默 */ }
+}
+
+async function saveViewerCode() {
+  const team = teamById(openTeamId);
+  if (!team || team.kind !== 'host' || team.role !== 'owner') return;
+  const code = el.viewerCodeInput.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 6);
+  if (code.length !== 6) return toast('设备码要 6 位数字或字母');
+  try {
+    const r = await api.viewerSetCode({ teamId: team.id, code });
+    if (!r || !r.ok) return toast((r && r.error) || '保存查看者码失败');
+    viewerCodes.set(team.id, r.code);
+    deviceLinks.delete(`${team.id}:viewer`);
+    renderDeviceBox(team);
+    toast('查看者码已保存，旧链接已失效');
+  } catch (e) { toast('保存查看者码失败'); }
+}
+
+async function resetViewerCode() {
+  const team = teamById(openTeamId);
+  if (!team || team.kind !== 'host' || team.role !== 'owner') return;
+  if (!(await askConfirm('重置查看者码？旧的查看者码和链接立即失效，已经打开的查看页面会在下次刷新时失效。', {
+    title: '重置查看者码？', okText: '重置', danger: true
+  }))) return;
+  try {
+    const r = await api.viewerResetCode(team.id);
+    if (!r || !r.ok) return toast((r && r.error) || '重置查看者码失败');
+    viewerCodes.set(team.id, r.code);
+    deviceLinks.delete(`${team.id}:viewer`);
+    renderDeviceBox(team);
+    toast('查看者码已重置，旧码立即失效');
+  } catch (e) { toast('重置查看者码失败'); }
 }
 
 async function saveDeviceCode() {
@@ -2374,6 +2647,17 @@ function renderTeamPanel(teamId) {
   st.members.forEach((m) => {
     el.memberRows.appendChild(memberRow(team, m, manage));
   });
+  // 已退出/被移除的成员单独列出，灰显并标注状态，避免「凭空消失」无从追溯
+  const left = Array.isArray(st.leftMembers) ? st.leftMembers : [];
+  if (left.length) {
+    const hd = document.createElement('div');
+    hd.className = 'mgLeftTitle';
+    hd.textContent = trText('已退出成员') + `（${left.length}）`;
+    el.memberRows.appendChild(hd);
+    left.forEach((m) => {
+      el.memberRows.appendChild(memberRow(team, Object.assign({}, m, { _left: true, online: false }), false));
+    });
+  }
   renderMemberProgress(team, manage);
   el.membersTip.textContent =
     team.kind === 'local'
@@ -2460,13 +2744,16 @@ function memberRow(team, m, manage) {
   row.className = 'mgRow';
 
   const a = document.createElement('span');
-  a.className = 'avatar clickable' + (m.online || m.id === team.meId ? '' : ' offline');
+  const presence = memberPresence(team, m);
+  a.className = 'avatar' + (presence === 'left' ? '' : ' clickable') + (presence === 'me' || presence === 'online' ? '' : ' offline');
   a.textContent = avatarOf(m);
-  a.title = '查看任务数量';
-  a.onclick = (e) => {
-    e.stopPropagation();
-    openMemberStats(team, m);
-  };
+  a.title = presence === 'left' ? trText('已退出团队') : trText('查看任务数量');
+  if (presence !== 'left') {
+    a.onclick = (e) => {
+      e.stopPropagation();
+      openMemberStats(team, m);
+    };
+  }
   row.appendChild(a);
 
   const main = document.createElement('div');
@@ -2479,7 +2766,7 @@ function memberRow(team, m, manage) {
   nm.appendChild(nameText);
 
   const hasRemark = !!String(m.remark || '').trim();
-  if (manage && m.id !== team.meId && team.kind !== 'local') {
+  if (manage && presence !== 'left' && m.id !== team.meId && team.kind !== 'local') {
     const rb = document.createElement('button');
     rb.className = 'mgRemarkBtn';
     rb.textContent = hasRemark ? '改备注' : '＋备注';
@@ -2498,12 +2785,13 @@ function memberRow(team, m, manage) {
     nm.appendChild(tag);
   }
   const roleTag = String(m.roleTag || '').trim();
-  if (roleTag || (manage && team.kind !== 'local')) {
+  const canEditTag = manage && presence !== 'left' && team.kind !== 'local';
+  if (roleTag || canEditTag) {
     const tb = document.createElement('button');
     tb.className = 'tagUser' + (roleTag ? '' : ' empty');
     tb.textContent = roleTag ? `#${roleTag}` : '＋角色';
-    tb.title = manage && team.kind !== 'local' ? '设置角色标签（发布任务时可按角色发）' : '角色标签';
-    if (manage && team.kind !== 'local') {
+    tb.title = canEditTag ? '设置角色标签（发布任务时可按角色发）' : '角色标签';
+    if (canEditTag) {
       tb.onclick = (e) => {
         e.stopPropagation();
         editRoleTag(tb, team, m);
@@ -2524,11 +2812,11 @@ function memberRow(team, m, manage) {
   row.appendChild(main);
 
   const st = document.createElement('span');
-  st.className = 'mgState';
-  st.textContent = m.id === team.meId ? '我' : m.online || Date.now() - (m.lastSeen || 0) < 45000 ? '在线' : '离线';
+  st.className = 'mgState' + (presence === 'online' ? ' online' : '');
+  st.textContent = presenceLabel(presence);
   row.appendChild(st);
 
-  if (manage && m.role !== 'owner' && m.id !== team.meId) {
+  if (manage && presence !== 'left' && m.role !== 'owner' && m.id !== team.meId) {
     const acts = document.createElement('div');
     acts.className = 'mgActs';
     if (team.role === 'owner') {
@@ -2704,8 +2992,18 @@ async function toggleTask(teamId, id, opts) {
   const t = taskById(team, id);
   if (!t) return;
   const o = opts || {};
-  if (!canCompleteTask(team, t)) {
+  if (!canCompleteTask(team, t, o.personal)) {
     toast('只有创建者、管理员或任务指派对象能标记完成');
+    return;
+  }
+  // 个人页面只改自己的完成标记，团队任务本身仍保持原状态
+  if (isPersonalView() && team.kind !== 'local' && !t.done && !t.closed) {
+    if (!t.personalDoneBy || typeof t.personalDoneBy !== 'object') t.personalDoneBy = {};
+    if (t.personalDoneBy[team.meId]) delete t.personalDoneBy[team.meId];
+    else t.personalDoneBy[team.meId] = Date.now();
+    editingId = null;
+    render();
+    await act(teamId, 'togglePersonalDone', { id });
     return;
   }
   if (!t.done && team.kind !== 'local' && !o.skipFilePrompt) {
@@ -2729,6 +3027,7 @@ async function toggleTask(teamId, id, opts) {
       }
     }
   }
+  const wasDone = !t.done;   // 这次操作是否把任务标记为完成
   t.done = !t.done;
   t.doneAt = t.done ? Date.now() : 0;
   const me = meOf(team);
@@ -2737,6 +3036,39 @@ async function toggleTask(teamId, id, opts) {
   editingId = null;
   render();
   await act(teamId, 'toggleTask', { id });
+
+  // 创建者/管理员标记完成后，询问是否发起 AI 文件整合汇总
+  if (wasDone && team.kind !== 'local' && canManage(team) && !o.skipSummaryPrompt) {
+    const hasFiles = !!(t.file || (t.memberFiles && Object.keys(t.memberFiles).length));
+    const answer = await askConfirm(
+      hasFiles
+        ? trText('任务已标记完成。是否发起 AI 对成员文件做整合汇总？汇总结果会存到本任务的文件夹里。')
+        : trText('任务已标记完成。这条任务没有附件文件，无法整合汇总。'),
+      {
+        title: trText('发起 AI 汇总'),
+        okText: trText('发起汇总'),
+        cancelText: trText('暂不'),
+        note: hasFiles,
+        notePlaceholder: trText('可选：填写本次汇总要求，例如按报价对比合并、只汇总某几个字段…')
+      }
+    );
+    const ok = answer && answer.ok !== undefined ? answer.ok : answer;
+    const note = answer && answer.note ? answer.note : '';
+    if (ok && hasFiles) {
+      try {
+        const r = await api.requestSummary(teamId, id, note);
+        if (r && r.ok) {
+          toast(r.autoSent
+            ? trText('已生成汇总请求，并在 WorkBuddy 里自动发起对话')
+            : trText('已生成汇总请求并唤起 WorkBuddy，提示词已复制，请粘贴发送'));
+        } else {
+          toast((r && r.error) || trText('生成汇总请求失败'));
+        }
+      } catch (e) {
+        toast(trText('生成汇总请求失败') + '：' + (e && e.message ? e.message : ''));
+      }
+    }
+  }
 }
 
 async function deleteTask(teamId, id) {
@@ -2763,34 +3095,6 @@ async function deleteTask(teamId, id) {
 }
 
 let taskEditFields = [];
-
-function progressTargetMembers(team, t) {
-  if (!team || team.kind === 'local') return [];
-  const members = (team.state && team.state.members) || [];
-  if (t.assigneeId) {
-    const one = members.find((m) => m.id === t.assigneeId);
-    return one ? [one] : [];
-  }
-  const a = audienceOf(t);
-  if (a.type === 'all') return members.slice();
-  if (a.type === 'members') return members.filter((m) => a.memberIds.includes(m.id));
-  return members.filter((m) => {
-    const tag = String(m.roleTag || '').replace(/^#+/, '').trim();
-    return !!tag && a.roles.includes(tag);
-  });
-}
-
-function progressValueOf(t, memberId) {
-  const v = t.progressBy && t.progressBy[memberId];
-  return v ? Math.max(0, Math.min(100, Math.round(Number(v.value) || 0))) : 0;
-}
-
-function overallProgress(team, t) {
-  const targets = progressTargetMembers(team, t);
-  if (!targets.length) return 0;
-  const sum = targets.reduce((n, m) => n + progressValueOf(t, m.id), 0);
-  return Math.round(sum / targets.length);
-}
 
 function renderTaskEditFields(team, t, editable) {
   if (!el.taskFieldsBox || !el.taskFieldsList) return;
@@ -2832,54 +3136,11 @@ function renderTaskEditFields(team, t, editable) {
   }
 }
 
-function renderTaskProgress(team, t, canAdjust) {
-  if (!el.taskProgressBox) return;
-  const local = team.kind === 'local';
-  const manager = canManage(team);
-  const hideOwnSlider = !local && manager;
-  el.taskProgressRange.classList.toggle('hidden', hideOwnSlider);
-  el.taskProgressScale.classList.toggle('hidden', hideOwnSlider);
-  el.taskProgressValue.classList.toggle('hidden', hideOwnSlider);
-  taskEditProgress = local ? progressValueOf(t, 'me') : progressValueOf(t, team.meId);
-  taskEditOwnProgress = taskEditProgress;
-  el.taskProgressValue.textContent = `${taskEditProgress}%`;
-  el.taskProgressRange.value = String(taskEditProgress);
-  el.taskProgressRange.disabled = !canAdjust;
-  el.taskProgressLabel.textContent = local ? '任务进度（拖到 100% 并保存即完成）' : manager ? '任务总进度' : '我的进度';
-  el.taskProgressOverall.classList.toggle('hidden', local || !manager);
-  el.taskProgressMembers.innerHTML = '';
-  if (!local && manager) {
-    const overall = overallProgress(team, t);
-    el.taskProgressOverallValue.textContent = `${overall}%`;
-    const targets = progressTargetMembers(team, t);
-    targets.forEach((m) => {
-      const v = progressValueOf(t, m.id);
-      const row = document.createElement('div');
-      row.className = 'progressMemberRow';
-      const name = document.createElement('span');
-      name.textContent = `${nameOf(m)}${v >= 100 ? ' ✓' : ''}`;
-      const bar = document.createElement('div');
-      bar.className = 'progressMemberBar';
-      const fill = document.createElement('i');
-      fill.style.width = `${v}%`;
-      bar.appendChild(fill);
-      const val = document.createElement('b');
-      val.textContent = `${v}%`;
-      row.appendChild(name);
-      row.appendChild(bar);
-      row.appendChild(val);
-      el.taskProgressMembers.appendChild(row);
-    });
-    el.taskProgressHint.textContent = targets.length
-      ? '总进度按这条任务的指派对象平均计算；成员可自己推进度。'
-      : '这条任务还没有明确的指派对象。';
-  } else if (!local) {
-    el.taskProgressHint.textContent = '你可以拖动自己的进度；任务内容由创建者或管理员修改。';
-  } else {
-    el.taskProgressHint.textContent = '拖到 100% 再点保存，这条任务会直接进入已完成。';
-  }
-  const showSubmit = !local && !manager && !t.done && canCompleteTask(team, t) && taskEditProgress >= 100;
-  el.progressSubmitRow.classList.toggle('hidden', !showSubmit);
+function renderTaskSubmit(team, t) {
+  if (!el.taskSubmitRow) return;
+  const show = team.kind !== 'local' && !canManage(team) && !t.done && !t.closed
+    && canSeeTask(team, t) && canCompleteTask(team, t);
+  el.taskSubmitRow.classList.toggle('hidden', !show);
 }
 
 function renderTaskFileBox(team, t) {
@@ -2888,12 +3149,33 @@ function renderTaskFileBox(team, t) {
   const local = team.kind === 'local';
   const isCreator = local || t.creatorId === team.meId;
   const own = !isCreator && t.memberFiles ? t.memberFiles[team.meId] : null;
+  el.taskFileFolder.disabled = false;
+  el.taskFileFolder.title = trText('打开该任务的文件夹');
+  // 成员提交的版本：每个文件一个图标，创建者/管理员点一下就能打开查看
+  if (el.taskMemberFiles) {
+    el.taskMemberFiles.innerHTML = '';
+    Object.keys(t.memberFiles || {}).forEach((id) => {
+      const meta = t.memberFiles[id];
+      if (!meta || !meta.storedRel) return;
+      const m = (team.state && team.state.members || []).find((x) => x.id === id);
+      const who = m ? nameOf(m) : (meta.uploadedByName || '成员');
+      const b = document.createElement('button');
+      b.className = 'memberFileBtn';
+      b.textContent = `📄 ${who} · v${meta.version || 1}`;
+      b.title = `${who}：${meta.displayName || '任务文件'}`;
+      b.onclick = async () => {
+        const r = await api.openTaskFile({ teamId: team.id, taskId: t.id, memberId: id });
+        if (!r || !r.ok) toast((r && r.error) || '打开文件失败');
+      };
+      el.taskMemberFiles.appendChild(b);
+    });
+  }
   if (!t.file) {
     el.taskFileName.textContent = '还没有任务文件';
     el.taskFileOpen.disabled = true;
     el.taskFileUpload.disabled = !canSeeTask(team, t);
     el.taskFileUpload.textContent = isCreator ? '上传文件' : '保存我的副本';
-    el.taskFileHint.textContent = '可以把桌面或微信里的文件拖进来，或点按钮选择文件。';
+    el.taskFileHint.textContent = trText('可以把桌面或微信里的文件拖进来，或点按钮选择文件。');
     return;
   }
   el.taskFileOpen.disabled = false;
@@ -2916,10 +3198,7 @@ function startEdit(teamId, id) {
   if (!t) return;
   const manager = canManage(team);
   const editable = team.kind === 'local' ? canEdit(team, t) : manager;
-  const canAdjust = team.kind === 'local'
-    || (!manager && canSeeTask(team, t))
-    || (manager && !!t.assigneeId && t.assigneeId === team.meId);
-  taskEditCtx = { teamId, id, editable, manager, canAdjust };
+  taskEditCtx = { teamId, id, editable, manager };
   editingId = id;
   taskEditFields = (t.fields || []).map((f) => ({ label: f.label || '', value: f.value || '' }));
   el.taskEditTitle.textContent = team.kind === 'local'
@@ -2935,13 +3214,13 @@ function startEdit(teamId, id) {
   taskEditLinkEditing = '';
   closeTaskEditLinkInput();
   renderTaskEditLink();
-  renderTaskProgress(team, t, canAdjust);
+  renderTaskSubmit(team, t);
   renderTaskEditFields(team, t, editable);
   renderTaskFileBox(team, t);
   el.taskEditLinkBlock && el.taskEditLinkBlock.classList.toggle('hidden', !editable);
   el.taskEditCancel.textContent = editable ? '取消' : '关闭';
-  el.taskEditSave.textContent = editable ? '保存' : '保存进度';
-  el.taskEditSave.classList.toggle('hidden', !editable && !canAdjust);
+  el.taskEditSave.textContent = editable ? '保存' : '关闭';
+  el.taskEditSave.classList.remove('hidden');
   el.taskEditPanel.classList.remove('hidden');
   setTimeout(() => {
     if (editable) {
@@ -2960,19 +3239,11 @@ function closeTaskEditor() {
 
 async function saveTaskEditor() {
   if (!taskEditCtx) return;
-  const { teamId, id, editable, canAdjust } = taskEditCtx;
+  const { teamId, id, editable } = taskEditCtx;
   const team = teamById(teamId);
   const t = taskById(team, id);
   if (!t) return closeTaskEditor();
   if (!applyTaskEditLinkInput()) return;
-  let progressChanged = false;
-  if (canAdjust) {
-    const value = Number(el.taskProgressRange.value) || 0;
-    if (value !== progressValueOf(t, team.kind === 'local' ? 'me' : team.meId)) {
-      progressChanged = true;
-      await act(teamId, 'setTaskProgress', { id, value });
-    }
-  }
   if (editable) {
     const val = el.taskEditText.value.replace(/\r\n/g, '\n').trim();
     if (!val) {
@@ -2995,7 +3266,6 @@ async function saveTaskEditor() {
       await act(teamId, 'editTask', { id, text: val, linkType: nextLinkType, linkTarget: nextLinkTarget, fields });
     }
   }
-  if (progressChanged) await refresh();
   closeTaskEditor();
   renderTasks();
   checkFileUpdates();
@@ -3033,6 +3303,7 @@ async function addTask() {
     text,
     done: false,
     assigneeId: '',
+    assigneeIds: [],
     creatorId: team.meId,
     createdAt: Date.now(),
     dueAt: pendingDueAt,
@@ -3042,7 +3313,6 @@ async function addTask() {
     linkType: pendingLinkType,
     linkTarget: pendingLinkTarget,
     fields,
-    progressBy: {},
     file: null,
     pendingFile: null,
     members: []
@@ -3090,7 +3360,7 @@ async function addTask() {
   }
 }
 
-/* ---------------- 指派菜单（仅团队任务） ---------------- */
+/* ---------------- 指派菜单（仅团队任务，可勾选多人） ---------------- */
 function openMenu(teamId, id, anchor) {
   const team = teamById(teamId);
   const t = taskById(team, id);
@@ -3099,30 +3369,58 @@ function openMenu(teamId, id, anchor) {
     toast('只有任务发起人或管理员能指派任务');
     return;
   }
-  el.menu.innerHTML = '';
+  closeMenu();
+  el.menu.className = 'menu audMenu assignMenu';
   const members = team.state.members || [];
-  const mk = (member) => {
-    const item = document.createElement('div');
-    item.className = 'menuItem' + (member ? '' : ' none');
-    if (member) {
-      const a = document.createElement('span');
-      a.className = 'avatar';
-      a.textContent = avatarOf(member);
-      item.appendChild(a);
-    }
-    const label = document.createElement('span');
-    label.textContent = member ? nameOf(member) + (member.id === team.meId ? '（我）' : '') : '未指派';
-    item.appendChild(label);
-    item.onclick = async () => {
+  let selected = assigneeIdsOf(t);
+
+  const paint = () => {
+    el.menu.innerHTML = '';
+    const tip = document.createElement('div');
+    tip.className = 'audTip';
+    tip.textContent = trText('可同时勾选多位成员，完成后点确定');
+    el.menu.appendChild(tip);
+    const list = document.createElement('div');
+    list.className = 'audList';
+    members.forEach((m) => {
+      const on = selected.includes(m.id);
+      const row = document.createElement('button');
+      row.className = 'audRow' + (on ? ' on' : '');
+      const tag = String(m.roleTag || '').trim();
+      row.innerHTML = `<b>${esc(nameOf(m))}${m.id === team.meId ? esc('（我）') : ''}</b>`
+        + `<em>${tag ? esc('#' + tag) : esc('成员')}</em>`
+        + `<span class="audCheck">${on ? '✓' : ''}</span>`;
+      row.onclick = (e) => {
+        e.preventDefault();
+        selected = on ? selected.filter((x) => x !== m.id) : selected.concat(m.id);
+        paint();
+      };
+      list.appendChild(row);
+    });
+    el.menu.appendChild(list);
+    const foot = document.createElement('div');
+    foot.className = 'audFoot';
+    const clear = document.createElement('button');
+    clear.className = 'ghost tinyBtn';
+    clear.textContent = trText('清除指派');
+    clear.onclick = (e) => { e.stopPropagation(); selected = []; paint(); };
+    const done = document.createElement('button');
+    done.className = 'audDone';
+    done.textContent = trText('确定');
+    done.onclick = async (e) => {
+      e.stopPropagation();
       closeMenu();
-      t.assigneeId = member ? member.id : '';
+      const ids = members.map((m) => m.id).filter((mid) => selected.includes(mid));
+      t.assigneeIds = ids;
+      t.assigneeId = ids[0] || '';
       render();
-      await act(teamId, 'editTask', { id, assigneeId: t.assigneeId });
+      await act(teamId, 'editTask', { id, assigneeIds: ids });
     };
-    return item;
+    foot.appendChild(clear);
+    foot.appendChild(done);
+    el.menu.appendChild(foot);
   };
-  el.menu.appendChild(mk(null));
-  members.forEach((m) => el.menu.appendChild(mk(m)));
+  paint();
 
   el.menu.classList.remove('hidden');
   const r = anchor.getBoundingClientRect();
@@ -3345,35 +3643,6 @@ async function doJoin(code, manual) {
   await refresh();
 }
 
-async function doDeviceLogin() {
-  const link = el.deviceLinkInput.value.trim();
-  el.teamsErr.textContent = '';
-  if (!link) {
-    el.teamsErr.textContent = '先粘贴创建者发的设备登录链接';
-    return;
-  }
-  if (el.btnDeviceLogin.disabled) return;
-  el.btnDeviceLogin.disabled = true;
-  el.btnDeviceLogin.textContent = '登录中…';
-  try {
-    const r = await api.deviceLogin(link);
-    if (!r || !r.ok) {
-      el.teamsErr.textContent = (r && r.error) || '设备登录失败';
-      return;
-    }
-    el.deviceLinkInput.value = '';
-    el.teamsPanel.classList.add('hidden');
-    await refresh();
-    toast(`已用同一成员身份进入「${r.name || '团队'}」`);
-  } catch (e) {
-    el.teamsErr.textContent = (e && e.message) || '设备登录失败，请让创建者检查或重置设备码';
-  } finally {
-    el.btnDeviceLogin.disabled = false;
-    el.btnDeviceLogin.textContent = '登录';
-  }
-}
-
-
 /* ---------------- 事件 ---------------- */
 function bind() {
   el.btnMin.onclick = () => api.min();
@@ -3434,6 +3703,53 @@ function bind() {
     };
   }
 
+  if (el.relaySaveBtn) el.relaySaveBtn.onclick = async () => {
+    if (el.relaySaveBtn.disabled) return;
+    const raw = String((el.relayUrlInput && el.relayUrlInput.value) || '').trim();
+    if (raw && !/^https?:\/\//i.test(raw)) {
+      toast(trText('中继地址必须以 http:// 或 https:// 开头'));
+      return;
+    }
+    el.relaySaveBtn.disabled = true;
+    try {
+      const r = await api.setRelayUrl(raw);
+      if (r && r.ok) {
+        el.relayUrlInput.value = r.relayUrl || '';
+        toast(trText('中继地址已保存'));
+      } else {
+        toast(trText('保存失败'));
+      }
+    } catch (e) {
+      toast(trText('保存失败'));
+    } finally {
+      el.relaySaveBtn.disabled = false;
+    }
+  };
+
+  if (el.btnPortalGen) el.btnPortalGen.onclick = genPortalCode;
+  if (el.btnPortalReset) el.btnPortalReset.onclick = resetPortalCode;
+  if (el.btnPortalCopy) el.btnPortalCopy.onclick = async () => {
+    const p = S && S.portal;
+    if (!p || !p.link) return;
+    try { await api.copy(p.link); toast('链接已复制'); } catch (e) { toast('复制失败'); }
+  };
+  if (el.checkUpdateBtn) el.checkUpdateBtn.onclick = async () => {
+    if (el.checkUpdateBtn.disabled) return;
+    const original = el.checkUpdateBtn.textContent;
+    el.checkUpdateBtn.disabled = true;
+    el.checkUpdateBtn.textContent = trText('检查中…');
+    try {
+      const info = await api.checkUpdate();
+      await offerUpdate(info, true);
+    } catch (e) {
+      toast(trText('检查失败，请稍后重试'));
+    } finally {
+      el.checkUpdateBtn.disabled = false;
+      el.checkUpdateBtn.textContent = original;
+    }
+  };
+  if (api.onUpdateAvailable) api.onUpdateAvailable((info) => offerUpdate(info, false));
+
   el.exportDataBtn.onclick = async () => {
     if (el.exportDataBtn.disabled) return;
     el.exportDataBtn.disabled = true;
@@ -3470,13 +3786,18 @@ function bind() {
     }
   };
 
-  // 鼠标移开就收成只显示任务的小条，移回来立刻展开
+  // 鼠标移开就收成只显示任务的小条，移回来稍等一下展开（留出按住拖动小条的时间）
   document.body.addEventListener('mouseenter', () => {
     hoverInside = true;
     edgeHover = false;
     clearTimeout(collapseTimer);
     clearTimeout(edgeLeaveTimer);
-    if (miniMode) setMini(false);
+    clearTimeout(expandTimer);
+    if (miniMode && !dragExpanding && Date.now() >= expandSuppressUntil) {
+      expandTimer = setTimeout(() => {
+        if (miniMode && !dragExpanding && Date.now() >= expandSuppressUntil) setMini(false);
+      }, 260);
+    }
   });
   document.body.addEventListener('mousemove', (e) => {
     const r = el.app.getBoundingClientRect();
@@ -3485,8 +3806,9 @@ function bind() {
   });
   document.body.addEventListener('mouseleave', () => {
     hoverInside = false;
-    // 只是在边缘拖拽缩放、或点了一下空输入框就移开：多等一会儿再收，避免鼠标一到边缘窗口就消失
-    const delay = windowResizing || edgeHover ? 2200 : 650;
+    // 统一为「鼠标离开主界面满 3 秒再收起」；边缘拖拽缩放也至少等 3 秒。
+    // 这里只是一次性快路径，真正的可靠性由 autoRestTick 心跳兜底。
+    const delay = 3000;
     edgeHover = false;
     if (document.activeElement === el.newTask && !el.newTask.value.trim()) {
       el.newTask.blur();
@@ -3505,11 +3827,41 @@ function bind() {
         clearTimeout(collapseTimer);
       } else {
         resizeSettleTimer = setTimeout(() => {
-          if (!miniMode && !edgeHover && hoverInside === false) scheduleRest(700);
+          if (!miniMode && !edgeHover && hoverInside === false) scheduleRest(3000);
         }, 700);
       }
     });
   }
+  // 切换窗口：失焦自动收起，重新聚焦取消待执行的收起（与鼠标移入等价）
+  if (api.onWindowFocus) {
+    api.onWindowFocus((focused) => {
+      windowFocused = !!focused;
+      if (focused) {
+        clearTimeout(collapseTimer);
+        if (miniMode && !dragExpanding && Date.now() >= expandSuppressUntil) {
+          clearTimeout(expandTimer);
+          expandTimer = setTimeout(() => {
+            if (miniMode && !dragExpanding && Date.now() >= expandSuppressUntil) setMini(false);
+          }, 260);
+        }
+      } else {
+        hoverInside = false;
+        edgeHover = false;
+        scheduleRest(3000);
+      }
+    });
+  }
+  // 页面切到后台标签页也自动收起（visibilitychange 不依赖鼠标事件）
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      hoverInside = false;
+      windowFocused = false;
+      scheduleRest(3000);
+    } else {
+      windowFocused = true;
+      clearTimeout(collapseTimer);
+    }
+  });
   el.btnAddTeam.onclick = () => openTeamsPanel();
   el.btnNotice.onclick = () => openNoticeEditor();
   el.btnInvite.onclick = () => openInvitePanel();
@@ -3568,6 +3920,11 @@ function bind() {
     const r = await api.openTaskFile({ teamId: taskEditCtx.teamId, taskId: taskEditCtx.id });
     if (!r || !r.ok) toast((r && r.error) || '打开文件失败');
   };
+  el.taskFileFolder.onclick = async () => {
+    if (!taskEditCtx) return;
+    const r = await api.openTaskFolder({ teamId: taskEditCtx.teamId, taskId: taskEditCtx.id });
+    if (!r || !r.ok) toast((r && r.error) || '打开文件夹失败');
+  };
   el.taskFileUpload.onclick = () => {
     if (!taskEditCtx) return;
     const ctx = { mode: 'task', teamId: taskEditCtx.teamId, taskId: taskEditCtx.id };
@@ -3587,28 +3944,9 @@ function bind() {
     if (e.key === 'Enter') { e.preventDefault(); applyTaskEditLinkInput(); }
     if (e.key === 'Escape') { e.preventDefault(); closeTaskEditLinkInput(); }
   });
-  el.taskProgressRange.addEventListener('input', () => {
-    taskEditProgress = Number(el.taskProgressRange.value) || 0;
-    el.taskProgressValue.textContent = `${taskEditProgress}%`;
-    if (taskEditCtx) {
-      const team = teamById(taskEditCtx.teamId);
-      const t = taskById(team, taskEditCtx.id);
-      if (team && team.kind === 'local') {
-        el.taskProgressHint.textContent = taskEditProgress >= 100
-          ? '保存后这条任务会直接进入已完成。'
-          : '拖到 100% 再点保存，这条任务会直接进入已完成。';
-      } else if (team && t && !canManage(team)) {
-        const showSubmit = !t.done && canCompleteTask(team, t) && taskEditProgress >= 100;
-        el.progressSubmitRow.classList.toggle('hidden', !showSubmit);
-      }
-    }
-  });
-  el.progressSubmitBtn.onclick = async () => {
+  el.taskSubmitBtn.onclick = async () => {
     if (!taskEditCtx) return;
     const { teamId, id } = taskEditCtx;
-    if (Number(el.taskProgressRange.value) >= 100) {
-      await act(teamId, 'setTaskProgress', { id, value: 100 });
-    }
     closeTaskEditor();
     await toggleTask(teamId, id);
   };
@@ -3663,63 +4001,78 @@ function bind() {
   el.memberStatsPanel.addEventListener('click', (e) => {
     if (e.target === el.memberStatsPanel) el.memberStatsPanel.classList.add('hidden');
   });
-  // 顶部空白处拖动窗口：不走系统 drag 区，改成主进程按“屏幕指针 + 窗口位置”直接算，
+  // 拖动窗口：不走系统 drag 区，改成主进程按“屏幕指针 + 窗口位置”直接算，
   // 这样高 DPI / 200% 缩放下也是 1:1，松开鼠标时窗口就在鼠标位置。
+  // 展开态从顶栏拖；迷你态顶栏隐藏，就从小条本身拖，便于把小条放到屏幕任意位置。
   const barEl = document.querySelector('.bar');
   let dragOn = false;
   let dragRaf = 0;
-  let dragGhostOn = false;
   let dragFrom = null;
+  let dragLast = null;
+  let dragCaptureEl = null;
   const endDrag = (e) => {
     if (!dragOn) return;
     dragOn = false;
+    dragExpanding = false;
     if (dragRaf) {
       cancelAnimationFrame(dragRaf);
       dragRaf = 0;
     }
     api.dragEnd();
-    hideMiniGhost();
-    dragGhostOn = false;
     dragFrom = null;
+    dragLast = null;
     try {
-      barEl.releasePointerCapture(e.pointerId);
+      if (dragCaptureEl) dragCaptureEl.releasePointerCapture(e.pointerId);
     } catch (err) {
       /* ignore */
     }
+    dragCaptureEl = null;
   };
-  barEl.addEventListener('pointerdown', (e) => {
+  const beginDrag = (e, captureEl) => {
     if (e.button !== 0) return;
-    if (e.target.closest('button,input,.brand,.ctrls')) return;
+    clearTimeout(expandTimer);
+    if (miniMode) dragExpanding = true;
     dragOn = true;
+    dragCaptureEl = captureEl;
     try {
-      barEl.setPointerCapture(e.pointerId);
+      captureEl.setPointerCapture(e.pointerId);
     } catch (err) {
       /* ignore */
     }
     api.dragStart();
     dragFrom = { x: e.screenX, y: e.screenY };
+    dragLast = { x: e.screenX, y: e.screenY };
     e.preventDefault();
+  };
+  barEl.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button,input,.brand,.ctrls')) return;
+    beginDrag(e, barEl);
   });
-  barEl.addEventListener('pointermove', (e) => {
+  // 迷你态：小条整体可拖动（隐藏的勾选框/按钮不拦，交给下面统一过滤）
+  el.tasks.addEventListener('pointerdown', (e) => {
+    if (!miniMode) return;
+    if (e.target.closest('button,input,a')) return;
+    beginDrag(e, el.app);
+  });
+  const onDragMove = (e) => {
     if (!dragOn) return;
-    // 真的拖起来了再显示小条虚线框，单纯点一下顶栏不会闪一下
-    if (!dragGhostOn && dragFrom) {
-      const dx = Math.abs(e.screenX - dragFrom.x);
-      const dy = Math.abs(e.screenY - dragFrom.y);
-      if (dx + dy >= 4) {
-        dragGhostOn = true;
-        showMiniGhost();
-      }
-    }
+    dragLast = { x: e.screenX, y: e.screenY };
     if (dragRaf) return;
     dragRaf = requestAnimationFrame(() => {
       dragRaf = 0;
-      api.dragMove();
+      if (dragFrom && dragLast) {
+        api.dragMove(dragLast.x - dragFrom.x, dragLast.y - dragFrom.y);
+      }
     });
-  });
+  };
+  barEl.addEventListener('pointermove', onDragMove);
+  el.app.addEventListener('pointermove', onDragMove);
   barEl.addEventListener('pointerup', endDrag);
   barEl.addEventListener('pointercancel', endDrag);
   barEl.addEventListener('lostpointercapture', endDrag);
+  el.app.addEventListener('pointerup', endDrag);
+  el.app.addEventListener('pointercancel', endDrag);
+  el.app.addEventListener('lostpointercapture', endDrag);
   // 左上角头像/名字：个人视图打开团队与设置；团队视图只通过右侧齿轮进群管理
   el.brandBtn.onclick = () => {
     const team = activeTeam();
@@ -3848,10 +4201,6 @@ function bind() {
     setTimeout(() => el.newTask.focus(), 200);
   };
   el.btnJoin.onclick = () => doJoin(el.codeInput.value.trim(), el.manualHost.value.trim());
-  el.btnDeviceLogin.onclick = doDeviceLogin;
-  el.deviceLinkInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') el.btnDeviceLogin.click();
-  });
   el.codeInput.addEventListener('input', () => {
     el.codeInput.value = el.codeInput.value.toUpperCase().replace(/[^0-9A-Z]/g, '');
   });
@@ -3875,6 +4224,18 @@ function bind() {
   el.btnDeviceLink.onclick = generateDeviceLink;
   el.btnDeviceSave.onclick = saveDeviceCode;
   el.btnDeviceReset.onclick = resetDeviceCode;
+  if (el.btnViewerSave) el.btnViewerSave.onclick = saveViewerCode;
+  if (el.btnViewerReset) el.btnViewerReset.onclick = resetViewerCode;
+  if (el.viewerCodeInput) el.viewerCodeInput.addEventListener('input', () => {
+    el.viewerCodeInput.value = el.viewerCodeInput.value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+  });
+  if (el.deviceKindSeg) el.deviceKindSeg.addEventListener('click', (e) => {
+    const b = e.target.closest('.segBtn');
+    if (!b) return;
+    deviceKind = b.dataset.kind === 'viewer' ? 'viewer' : 'member';
+    const team = teamById(openTeamId);
+    if (team) renderDeviceBox(team);
+  });
   el.deviceMember.onchange = () => {
     const team = teamById(openTeamId);
     if (!team) return;
@@ -3920,15 +4281,52 @@ function bind() {
   };
 
   /* 任务列表事件 */
-  el.newTask.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      addTask();
+  el.newTask.addEventListener('keydown', async (e) => {
+    // Enter 发布；Shift+Enter / Ctrl+Enter（含 Cmd+Enter）都换行。
+    // 输入法组字过程中的 Enter 是「选字」，不能触发发布。
+    if (e.key !== 'Enter') return;
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    // 个人任务：Enter 直接发布。
+    // 团队任务：先弹确认框，默认焦点在「确认发布」按钮（Enter 即发布），
+    //          按 Esc 或点「取消」则放弃；Shift/Ctrl+Enter 仍是换行，不受影响。
+    if (!isPersonalView()) {
+      // 阻止本次 Enter 冒泡到 window 的确认框键盘处理器，避免刚弹出就被立刻确认
+      e.stopPropagation();
+      const ok = await askConfirm(
+        trText('确定发布这条团队任务？团队所有可见成员都能看到。'),
+        {
+          title: trText('发布团队任务？'),
+          okText: trText('确认发布'),
+          cancelText: trText('取消'),
+          defaultOk: true
+        }
+      );
+      if (!ok) return;
     }
+    addTask();
   });
   el.newTask.addEventListener('input', autoGrowTask);
   el.newTask.addEventListener('focus', autoGrowTask);
   el.btnAddTask.onclick = () => addTask();
+  if (el.btnMiniNow) {
+    el.btnMiniNow.onclick = () => {
+      // 马上收成迷你条：跳过 canRest 的鼠标/面板/输入框等守卫，立即执行。
+      // 关掉任何面板与菜单，输入框失焦，避免收起后残留浮层或误触。
+      closeMenu();
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      clearTimeout(collapseTimer);
+      clearTimeout(expandTimer);
+      clearTimeout(edgeLeaveTimer);
+      hoverInside = false;
+      edgeHover = false;
+      // 收起后鼠标仍压在按钮原位置（现在是迷你条区域），短暂压制 hover 展开，
+      // 等用户真正把鼠标移走再移回来才展开。
+      expandSuppressUntil = Date.now() + 700;
+      setMini(true);
+    };
+  }
   window.addEventListener('resize', autoGrowTask);
   el.linkUrlBtn.onclick = () => openLinkEditor('url');
   el.linkPathBtn.onclick = () => openAttachPanel({ mode: 'composer' });
@@ -3969,7 +4367,7 @@ function bind() {
     if (!row) return;
     const id = row.dataset.id;
     const teamId = row.dataset.team;
-    if (e.target.closest('.cb')) return void toggleTask(teamId, id);
+    if (e.target.closest('.cb')) return void toggleTask(teamId, id, { personal: isPersonalView() });
     if (e.target.closest('.submitFile')) return void openAttachPanel({ mode: 'submit', teamId, taskId: id });
     if (e.target.closest('.assignee')) return void openMenu(teamId, id, e.target.closest('.assignee'));
     if (e.target.closest('.del')) return void deleteTask(teamId, id);
@@ -4026,15 +4424,25 @@ function bind() {
 
   window.addEventListener('keydown', (e) => {
     if (!confirmResolver) return;
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       settleConfirm(false);
-    } else if (e.key === 'Enter' && document.activeElement === el.confirmCancel) {
-      e.preventDefault();
-      settleConfirm(false);
+    } else if (e.key === 'Enter') {
+      // defaultOk（如团队任务发布）：Enter 直接确认；只有焦点落在取消按钮时才放弃。
+      // 危险操作弹窗（默认取消）：保持原行为，焦点在取消按钮时 Enter = 取消。
+      if (confirmDefaultOk) {
+        e.preventDefault();
+        settleConfirm(document.activeElement !== el.confirmCancel);
+      } else if (document.activeElement === el.confirmCancel) {
+        e.preventDefault();
+        settleConfirm(false);
+      }
     }
   });
   window.addEventListener('resize', closeMenu);
+  // 兜底心跳：鼠标离开主界面满 3 秒自动收成迷你条（不依赖一次性 mouseleave 事件）
+  setInterval(autoRestTick, 500);
 }
 
 /* ---------------- 启动 ---------------- */

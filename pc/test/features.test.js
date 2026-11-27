@@ -9,6 +9,8 @@ const store = require('../src/store');
 const notify = require('../src/notify');
 const fileStore = require('../src/files');
 const aiApi = require('../src/aiapi');
+const summary = require('../src/summary');
+const workbuddy = require('../src/workbuddy');
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tdlvv-features-'));
@@ -26,22 +28,29 @@ function add(state, text, extra, actor) {
   return action.createdId;
 }
 
-function testProgress() {
+function testAssignMulti() {
   const local = store.createBoard({ kind: 'local', name: '个人', ownerName: '我' });
   const id = add(local, '写周报', {}, 'me');
-  storageApply(local, { type: 'setTaskProgress', id, value: 60 }, 'me');
-  assert.strictEqual(local.tasks[0].progressBy.me.value, 60);
-  storageApply(local, { type: 'setTaskProgress', id, value: 100 }, 'me');
+  storageApply(local, { type: 'toggleTask', id }, 'me');
   assert.strictEqual(local.tasks[0].done, true);
   assert.ok(local.tasks[0].doneAt > 0);
 
   const { state, member } = makeTeam();
-  const tid = add(state, '团队设计稿', { assigneeId: member.id }, store.HOST_ID);
-  storageApply(state, { type: 'setTaskProgress', id: tid, value: 80 }, member.id);
-  assert.strictEqual(state.tasks[0].progressBy[member.id].value, 80);
-  storageApply(state, { type: 'setTaskProgress', id: tid, value: 30, memberId: store.HOST_ID }, store.HOST_ID);
-  assert.strictEqual(state.tasks[0].progressBy[store.HOST_ID].value, 30);
-  console.log('✓ 进度：个人 100% 自动完成；成员改自己进度；管理员可改成员进度');
+  const member2 = store.addMember(state, '小王', '🐱');
+  const tid = add(state, '团队设计稿', { assigneeIds: [member.id, member2.id] }, store.HOST_ID);
+  assert.deepStrictEqual(state.tasks[0].assigneeIds, [member.id, member2.id]);
+  assert.strictEqual(state.tasks[0].assigneeId, member.id);
+  // 任一被指派成员都能标记完成
+  storageApply(state, { type: 'toggleTask', id: tid }, member2.id);
+  assert.strictEqual(state.tasks[0].done, true);
+  // 未被指派的成员不能标记完成
+  const outsider = store.addMember(state, '外人', '🐰');
+  const tid2 = add(state, '另一个任务', { assigneeIds: [member.id] }, store.HOST_ID);
+  assert.throws(
+    () => storageApply(state, { type: 'toggleTask', id: tid2 }, outsider.id),
+    /只有创建者、管理员，或被指派的成员能标记完成/
+  );
+  console.log('✓ 多选指派：可指派多人；任一被指派成员可完成；无关成员被拒');
 }
 
 function storageApply(state, action, actor) {
@@ -267,6 +276,12 @@ function testAssignPermissions() {
   );
   assert.strictEqual(state.tasks[0].assigneeId, member.id, '成员越权改指派必须失败且不改数据');
 
+  // 可一次勾选多名成员；旧的单值写法仍然兼容
+  storageApply(state, { type: 'editTask', id: tid, assigneeIds: [member.id, store.HOST_ID] }, store.HOST_ID);
+  assert.deepStrictEqual(state.tasks[0].assigneeIds, [member.id, store.HOST_ID]);
+  storageApply(state, { type: 'editTask', id: tid, assigneeId: member.id }, store.HOST_ID);
+  assert.deepStrictEqual(state.tasks[0].assigneeIds, [member.id]);
+
   // 指派对象必须真实存在
   assert.throws(
     () => storageApply(state, { type: 'editTask', id: tid, assigneeId: 'nobody' }, store.HOST_ID),
@@ -316,8 +331,90 @@ async function testAiApi() {
   console.log('✓ AI 接口：令牌鉴权、任务字段、团队文件根目录和成员副本可读');
 }
 
+function testSummaryRequest() {
+  const root = tmpRoot();
+  const fileA = path.join(root, 'a.xlsx');
+  const fileB = path.join(root, 'b.xlsx');
+  fs.writeFileSync(fileA, 'a');
+  fs.writeFileSync(fileB, 'b');
+  const folder = path.join(root, '任务文件夹');
+  const members = [{ id: 'm1', name: '小李' }];
+  const task = {
+    id: 't1', text: '报价单1', done: true, doneByName: '创建者', fields: [],
+    file: { displayName: 'a.xlsx', storedRel: 'a.xlsx', root, size: 1, version: 1 },
+    memberFiles: { m1: { displayName: 'b.xlsx', storedRel: 'b.xlsx', root, size: 1, version: 2 } }
+  };
+  const io = {
+    members,
+    displayName: (m) => m.name,
+    resolveFile: (rel, r) => path.join(r || root, rel),
+    exists: (p) => fs.existsSync(p)
+  };
+  const req = summary.buildRequest({
+    teamName: '测试团队', teamId: 'team1', task, note: '按报价对比合并',
+    taskFolder: folder, aiBridge: { baseUrl: 'http://127.0.0.1:1', token: 'tk' }, io
+  });
+  assert.strictEqual(req.type, 'tdlvv.ai.summary.request');
+  assert.strictEqual(req.status, 'pending');
+  assert.strictEqual(req.instruction, '按报价对比合并');
+  assert.strictEqual(req.sourceFiles.length, 2);
+  assert.strictEqual(req.outputPath, path.join(folder, '报价单1-成员汇总.xlsx'));
+  assert.ok(req.outputPath.includes('任务文件夹'));
+  assert.strictEqual(req.aiBridge.token, 'tk');
+  const written = summary.writeRequest(folder, req);
+  assert.ok(fs.existsSync(written.jsonPath));
+  assert.ok(fs.existsSync(written.mdPath));
+  const saved = JSON.parse(fs.readFileSync(written.jsonPath, 'utf8'));
+  assert.strictEqual(saved.task.title, '报价单1');
+  assert.ok(fs.readFileSync(written.mdPath, 'utf8').includes('按报价对比合并'));
+  console.log('✓ AI 汇总请求：源文件/输出路径/说明/桥接信息写入任务文件夹');
+}
+
+function testWorkBuddyReuse() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-reuse-'));
+  const projects = path.join(tmp, 'projects');
+  const slugDir = path.join(projects, 'd-wb-test');
+  fs.mkdirSync(slugDir, { recursive: true });
+  const memFile = path.join(tmp, 'session.json');
+
+  // 1) 完全无会话 -> 新建对话
+  let plan = workbuddy.planLaunch(memFile, projects);
+  assert.strictEqual(plan.mode, 'new');
+  assert.strictEqual(plan.url, 'workbuddy://home');
+
+  // 2) 有历史会话 -> 复用最近对话过的会话
+  const s1 = path.join(slugDir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl');
+  fs.writeFileSync(s1, '{}', 'utf8');
+  plan = workbuddy.planLaunch(memFile, projects);
+  assert.strictEqual(plan.mode, 'reuse-recent');
+  assert.strictEqual(plan.url, 'workbuddy://chat/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+  assert.strictEqual(workbuddy.readRemembered(memFile), 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+
+  // 3) 已记住的会话仍有效 -> 继续复用（模拟多项目多会话时取回记住的那个）
+  const slugDir2 = path.join(projects, 'd-wb-other');
+  fs.mkdirSync(slugDir2, { recursive: true });
+  const s2 = path.join(slugDir2, '11111111-2222-3333-4444-555555555555.jsonl');
+  fs.writeFileSync(s2, '{}', 'utf8');
+  // 让 s2 更新，若按「最近」会选它；但记住的 s1 仍在 -> 应复用 s1
+  const now = Date.now() + 5000;
+  fs.utimesSync(s2, now / 1000, now / 1000);
+  plan = workbuddy.planLaunch(memFile, projects);
+  assert.strictEqual(plan.mode, 'reuse');
+  assert.strictEqual(plan.id, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+
+  // 4) 记住的会话被删除 -> 回退到最近会话
+  fs.unlinkSync(s1);
+  plan = workbuddy.planLaunch(memFile, projects);
+  assert.strictEqual(plan.mode, 'reuse-recent');
+  assert.strictEqual(plan.id, '11111111-2222-3333-4444-555555555555');
+
+  console.log('✓ WorkBuddy 会话复用：无会话新建 / 有历史复用最近 / 记住的优先 / 失效回退');
+}
+
 (async () => {
-  testProgress();
+  testSummaryRequest();
+  testWorkBuddyReuse();
+  testAssignMulti();
   testAssignPermissions();
   testRenameBoard();
   testTemplateCapAndNoticeClear();

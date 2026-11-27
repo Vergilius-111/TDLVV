@@ -1,7 +1,7 @@
 {
   "name": "tasknotes",
   "productName": "TDLVV",
-  "version": "0.6.3",
+  "version": "0.6.9",
   "description": "TDLVV 任务便签 - 多团队共享的桌面待办（截止/提醒/成员角色）",
   "main": "src/main.js",
   "author": "TDLVV",
@@ -22,14 +22,23 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "afterPack": "afterPack.js",
     "files": [
       "src/**/*",
       "package.json"
     ],
     "extraResources": [
       {
+        "from": "bin/cloudflared.exe",
+        "to": "cloudflared.exe"
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "bin/workbuddy-send.ps1",
+        "to": "workbuddy-send.ps1"
       }
     ],
     "win": {
@@ -41,6 +50,7 @@
           ]
         }
       ],
+      "signAndEditExecutable": false,
       "icon": "build/icon.ico",
       "artifactName": "TDLVV-Setup-v${version}.${ext}"
     },

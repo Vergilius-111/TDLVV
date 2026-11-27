@@ -104,13 +104,17 @@
       background: var(--card); border: 1px solid var(--edge);
       border-radius: 13px; padding: 12px 13px;
       margin-bottom: 8px; box-shadow: 0 3px 12px rgba(80, 64, 12, 0.06);
+      cursor: pointer;
     }
+    .task:active { background: #fff6cf; }
     .task.pinned { border-color: rgba(184, 145, 42, 0.45); }
+    .task.finished { opacity: 0.72; }
     .taskText { font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
     .taskMeta { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 5px 10px; font-size: 12px; color: var(--ink-2); }
     .taskMeta span { white-space: nowrap; }
     .taskMeta .due { color: var(--accent); font-weight: 600; }
     .taskMeta .overdue { color: var(--danger); }
+    .taskMeta .myDone { color: var(--ok); font-weight: 600; }
     .fields { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--edge); display: flex; flex-direction: column; gap: 4px; }
     .fieldLine { font-size: 12px; line-height: 1.5; color: var(--ink-2); }
     .fieldLine b { color: var(--accent); font-weight: 600; }
@@ -138,12 +142,14 @@
       color: var(--ink); resize: none; outline: none;
     }
     #newTask:focus { border-color: var(--accent); }
-    .sendBtn {
-      flex: 0 0 auto; height: 46px; padding: 0 16px;
-      border: 0; border-radius: 11px; background: var(--accent);
-      color: var(--accent-ink); font-size: 15px; font-weight: 600; cursor: pointer;
+    .sendBtn, .moreBtn {
+      flex: 0 0 auto; height: 46px; padding: 0 14px;
+      border: 1px solid var(--edge); border-radius: 11px;
+      background: var(--accent); color: var(--accent-ink);
+      font-size: 15px; font-weight: 600; cursor: pointer;
     }
-    .sendBtn:disabled { opacity: 0.45; }
+    .moreBtn { background: rgba(255,255,255,0.55); color: var(--ink-2); border-color: var(--edge); }
+    .sendBtn:disabled, .moreBtn:disabled { opacity: 0.45; }
     .publishHint { display: none; padding: 12px 12px calc(14px + env(safe-area-inset-bottom)); font-size: 12px; color: var(--muted); text-align: center; border-top: 1px solid var(--edge); }
     .toast {
       position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom));
@@ -151,14 +157,103 @@
       max-width: 84vw; padding: 9px 13px; border-radius: 9px;
       background: rgba(61, 54, 32, 0.92); color: #fff;
       font-size: 13px; line-height: 1.5; opacity: 0; pointer-events: none;
-      transition: opacity 0.18s ease, transform 0.18s ease; z-index: 9;
+      transition: opacity 0.18s ease, transform 0.18s ease; z-index: 30;
       text-align: center;
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     [hidden] { display: none !important; }
+
+    /* 弹出层：任务详情 / 发布面板 */
+    .overlay {
+      position: fixed; inset: 0; z-index: 10;
+      background: rgba(40, 32, 10, 0.34);
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    .sheet {
+      width: 100%; max-width: 520px; max-height: 92dvh; overflow-y: auto;
+      background: #fffdf4; border-radius: 20px 20px 0 0;
+      padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+      box-shadow: 0 -8px 30px rgba(60, 46, 8, 0.18);
+    }
+    .sheetHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .sheetHead b { font-size: 16px; }
+    .closeBtn {
+      width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--edge);
+      background: rgba(255,255,255,0.6); color: var(--ink-2); font-size: 18px; cursor: pointer;
+    }
+    .detailText { font-size: 17px; line-height: 1.55; font-weight: 600; word-break: break-word; white-space: pre-wrap; }
+    .detailSec { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--edge); }
+    .detailSec h4 { margin: 0 0 8px; font-size: 12px; color: var(--accent); letter-spacing: 0.4px; }
+    .kv { display: flex; gap: 8px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+    .kv b { color: var(--ink); flex: 0 0 62px; font-weight: 600; }
+    .kv span { word-break: break-word; }
+    .linkBtn {
+      display: inline-block; margin: 4px 6px 0 0; padding: 6px 11px; border-radius: 9px;
+      border: 1px solid var(--edge); background: rgba(255,255,255,0.6);
+      color: var(--accent); font-size: 13px; text-decoration: none;
+    }
+    .fileBtn {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      width: 100%; margin-top: 6px; padding: 9px 11px; border-radius: 10px;
+      border: 1px solid var(--edge); background: rgba(255,255,255,0.6);
+      color: var(--ink); font-size: 13px; text-decoration: none; cursor: pointer;
+    }
+    .fileBtn small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .progressBox { margin-top: 6px; }
+    .progressTrack { height: 8px; border-radius: 6px; background: rgba(120,100,30,0.14); overflow: hidden; }
+    .progressFill { height: 100%; background: var(--accent); border-radius: 6px; transition: width 0.25s ease; }
+    .progressFill.full { background: var(--ok); }
+    .progressNames { margin-top: 6px; font-size: 12px; color: var(--ink-2); line-height: 1.6; }
+    .doneToggle {
+      width: 100%; margin-top: 16px; height: 44px; border: 0; border-radius: 11px;
+      background: var(--accent); color: var(--accent-ink); font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .doneToggle.undo { background: rgba(255,255,255,0.7); color: var(--ink-2); border: 1px solid var(--edge); }
+    .doneToggle:disabled { opacity: 0.5; }
+
+    .formRow { margin-bottom: 12px; }
+    .formRow > label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 5px; font-weight: 600; }
+    .formInput {
+      width: 100%; min-height: 42px; border: 1px solid var(--edge); border-radius: 10px;
+      background: rgba(255,255,255,0.7); padding: 9px 11px; color: var(--ink); outline: none;
+    }
+    .formInput:focus { border-color: var(--accent); }
+    textarea.formInput { min-height: 84px; resize: vertical; line-height: 1.5; }
+    .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .checkList {
+      max-height: 168px; overflow-y: auto; border: 1px solid var(--edge); border-radius: 10px;
+      background: rgba(255,255,255,0.6); padding: 4px 8px;
+    }
+    .checkItem { display: flex; align-items: center; gap: 8px; padding: 7px 2px; font-size: 14px; border-bottom: 1px dashed rgba(120,100,30,0.12); }
+    .checkItem:last-child { border-bottom: 0; }
+    .checkItem input { width: 18px; height: 18px; accent-color: var(--accent); }
+    .fieldRow { display: flex; gap: 7px; margin-bottom: 7px; }
+    .fieldRow input { min-width: 0; }
+    .fieldRow input:first-child { flex: 0 0 34%; }
+    .fieldRow input:last-child { flex: 1; }
+    .miniBtn {
+      border: 1px solid var(--edge); border-radius: 9px; background: rgba(255,255,255,0.6);
+      color: var(--ink-2); font-size: 12px; padding: 6px 10px; cursor: pointer;
+    }
+    .segBtns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .segBtn {
+      border: 1px solid var(--edge); border-radius: 9px; background: rgba(255,255,255,0.6);
+      color: var(--ink-2); font-size: 13px; padding: 7px 12px; cursor: pointer;
+    }
+    .segBtn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+    .submitBtn {
+      width: 100%; height: 48px; border: 0; border-radius: 11px; margin-top: 6px;
+      background: var(--accent); color: var(--accent-ink); font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    .submitBtn:disabled { opacity: 0.5; }
+    .filePick { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+    .filePick input { flex: 1; min-width: 0; font-size: 12px; }
+
     @media (min-width: 700px) {
       body { padding: 18px 0; }
       .shell { min-height: calc(100dvh - 36px); border: 1px solid var(--edge); border-radius: 22px; overflow: hidden; box-shadow: 0 18px 50px rgba(80, 64, 12, 0.14); }
+      .overlay { align-items: center; }
+      .sheet { border-radius: 20px; max-height: 86dvh; }
     }
   </style>
 </head>
@@ -167,7 +262,7 @@
     <section class="login" id="loginView">
       <div class="brandMark">🐱</div>
       <h1>TDLVV 手机端</h1>
-      <p>只查看当前任务和发布任务。文件和任务文件编辑不在这里，避免在手机上误改。</p>
+      <p>查看任务详情、勾选完成、发布带文件和截止时间的任务。</p>
       <input class="codeInput" id="codeInput" maxlength="6" inputmode="text" autocomplete="one-time-code" placeholder="设备码" aria-label="设备登录码" />
       <button class="loginBtn" id="loginBtn">进入团队</button>
       <div class="loginMsg" id="loginMsg"></div>
@@ -187,13 +282,92 @@
       <footer class="composer" id="composer">
         <div class="composerLabel"><span>发布到：<b>全员</b></span><span id="postState"></span></div>
         <div class="composerRow">
-          <textarea id="newTask" rows="1" maxlength="500" placeholder="写一条任务，发布到团队…"></textarea>
+          <textarea id="newTask" rows="1" maxlength="500" placeholder="写一条任务，点「详细」可加文件、截止、指派…"></textarea>
+          <button class="moreBtn" id="moreBtn">详细</button>
           <button class="sendBtn" id="sendBtn">发布</button>
         </div>
       </footer>
-      <div class="publishHint" id="publishHint">当前身份是普通成员，只能查看任务；发布任务需要创建者或管理员。</div>
+      <div class="publishHint" id="publishHint">当前身份是普通成员，只能查看任务和勾选完成；发布任务需要创建者或管理员。</div>
     </section>
   </div>
+
+  <!-- 任务详情 -->
+  <div class="overlay" id="detailOverlay" hidden>
+    <div class="sheet" id="detailSheet">
+      <div class="sheetHead"><b>任务详情</b><button class="closeBtn" id="detailClose" aria-label="关闭">×</button></div>
+      <div id="detailBody"></div>
+    </div>
+  </div>
+
+  <!-- 发布任务（完整） -->
+  <div class="overlay" id="publishOverlay" hidden>
+    <div class="sheet" id="publishSheet">
+      <div class="sheetHead"><b>发布任务</b><button class="closeBtn" id="publishClose" aria-label="关闭">×</button></div>
+      <div class="formRow">
+        <label for="fText">任务内容</label>
+        <textarea class="formInput" id="fText" maxlength="500" placeholder="这条任务要做什么？"></textarea>
+      </div>
+      <div class="formGrid">
+        <div class="formRow">
+          <label for="fDue">截止时间</label>
+          <input class="formInput" type="datetime-local" id="fDue" />
+        </div>
+        <div class="formRow">
+          <label for="fRemind">提前提醒</label>
+          <select class="formInput" id="fRemind">
+            <option value="0">不提醒</option>
+            <option value="1">提前 1 小时</option>
+            <option value="3">提前 3 小时</option>
+            <option value="6">提前 6 小时</option>
+            <option value="12">提前 12 小时</option>
+            <option value="24">提前 1 天</option>
+            <option value="48">提前 2 天</option>
+          </select>
+        </div>
+      </div>
+      <div class="formRow">
+        <label>发布范围</label>
+        <div class="segBtns" id="fAudSeg">
+          <button class="segBtn on" data-aud="all">👥 全员</button>
+          <button class="segBtn" data-aud="members">部分成员</button>
+          <button class="segBtn" data-aud="roles">按角色</button>
+        </div>
+      </div>
+      <div class="formRow" id="fAudMembersBox" hidden>
+        <label>可见成员（勾选）</label>
+        <div class="checkList" id="fAudMembers"></div>
+      </div>
+      <div class="formRow" id="fAudRolesBox" hidden>
+        <label>可见角色（勾选）</label>
+        <div class="checkList" id="fAudRoles"></div>
+      </div>
+      <div class="formRow">
+        <label>指派给（可多选，决定「几人已完成」的分母）</label>
+        <div class="checkList" id="fAssignees"></div>
+      </div>
+      <div class="formRow">
+        <label>任务链接（可选）</label>
+        <div class="formGrid">
+          <select class="formInput" id="fLinkType">
+            <option value="">无</option>
+            <option value="url">网页链接</option>
+          </select>
+          <input class="formInput" id="fLinkTarget" placeholder="https://…" />
+        </div>
+      </div>
+      <div class="formRow">
+        <label>附加字段（可选）</label>
+        <div id="fFields"></div>
+        <button class="miniBtn" id="fAddField">＋ 添加字段</button>
+      </div>
+      <div class="formRow">
+        <label>任务文件（可选，先建任务再上传）</label>
+        <div class="filePick"><input type="file" id="fFile" /></div>
+      </div>
+      <button class="submitBtn" id="fSubmit">发布任务</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -206,29 +380,47 @@
     let polling = null;
     let busy = false;
     let toastTimer = null;
+    let stateData = null;
+    let detailId = '';
 
     function toast(text) {
       const node = $('toast');
       node.textContent = text;
       node.classList.add('show');
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => node.classList.remove('show'), 2200);
+      toastTimer = setTimeout(() => node.classList.remove('show'), 2400);
     }
 
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function fmtTs(ts) {
+      if (!ts) return '—';
+      const d = new Date(ts);
+      const p = (n) => String(n).padStart(2, '0');
+      return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
     function fmtDue(ts) {
       if (!ts) return '';
       const d = new Date(ts);
       const now = new Date();
       const p = (n) => String(n).padStart(2, '0');
       const hm = p(d.getHours()) + ':' + p(d.getMinutes());
-      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
-        return '今天 ' + hm;
-      }
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return '今天 ' + hm;
       const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-      if (d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate()) {
-        return '明天 ' + hm;
-      }
+      if (d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate()) return '明天 ' + hm;
       return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+    }
+    function fmtSize(n) {
+      n = Number(n) || 0;
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1024 / 1024).toFixed(1) + ' MB';
+    }
+    function audLabel(a) {
+      if (!a || a.type === 'all') return '全员';
+      if (a.type === 'roles') return '按角色：' + (a.roles || []).join(' / ');
+      return '部分 ' + ((a.memberIds || []).length) + ' 人';
     }
 
     async function api(path, opts) {
@@ -237,8 +429,7 @@
       if (token) headers['x-token'] = token;
       if (o.body !== undefined) headers['content-type'] = 'application/json';
       const r = await fetch(path, {
-        method: o.method || 'GET',
-        headers,
+        method: o.method || 'GET', headers,
         body: o.body === undefined ? undefined : JSON.stringify(o.body),
         cache: 'no-store'
       });
@@ -249,13 +440,34 @@
       return data || {};
     }
 
+    // 上传文件用二进制原始请求，不走 JSON 封装
+    async function uploadFile(taskId, file) {
+      const q = new URLSearchParams({ task: taskId, name: file.name });
+      const r = await fetch('/api/file?' + q.toString(), {
+        method: 'POST',
+        headers: { 'x-token': token, 'content-type': 'application/octet-stream' },
+        body: file,
+        cache: 'no-store'
+      });
+      let data = null;
+      try { data = await r.json(); } catch (e) { /* ignore */ }
+      if (!r.ok) throw new Error((data && data.error) || '文件上传失败');
+      return data;
+    }
+    function fileUrl(taskId, memberId) {
+      const q = new URLSearchParams({ task: taskId, token: token });
+      if (memberId) q.set('member', memberId);
+      return '/api/file?' + q.toString();
+    }
+
     function showLogin(msg) {
       token = '';
       localStorage.removeItem(tokenKey);
-      clearInterval(polling);
-      polling = null;
+      clearInterval(polling); polling = null;
       $('appView').hidden = true;
       $('loginView').hidden = false;
+      $('detailOverlay').hidden = true;
+      $('publishOverlay').hidden = true;
       $('loginMsg').textContent = msg || '';
       setTimeout(() => { try { $('codeInput').focus(); } catch (e) { /* ignore */ } }, 120);
     }
@@ -282,69 +494,57 @@
     }
 
     function renderTasks(data) {
+      stateData = data;
       const list = $('taskList');
       list.innerHTML = '';
       const open = (data.tasks || []).filter((t) => !t.done && !t.closed);
       const done = (data.tasks || []).filter((t) => t.done || t.closed);
       $('summary').textContent = '待办 ' + open.length + ' 条' + (done.length ? ' · 已完成/关闭 ' + done.length + ' 条' : '');
-      if (!open.length) {
+      const all = open.concat(done);
+      if (!all.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
         const mark = document.createElement('span');
-        mark.className = 'mark';
-        mark.textContent = '✨';
+        mark.className = 'mark'; mark.textContent = '✨';
         empty.appendChild(mark);
-        empty.appendChild(document.createTextNode(done.length ? '当前没有未完成任务' : '团队里还没有任务'));
+        empty.appendChild(document.createTextNode('团队里还没有任务'));
         list.appendChild(empty);
         return;
       }
-      open.forEach((t) => {
+      all.forEach((t) => {
         const card = document.createElement('article');
-        card.className = 'task' + (t.pinned ? ' pinned' : '');
+        card.className = 'task' + (t.pinned ? ' pinned' : '') + (t.done || t.closed ? ' finished' : '');
         const text = document.createElement('div');
         text.className = 'taskText';
-        if (t.pinned) text.textContent = '📌 ' + t.text;
-        else text.textContent = t.text;
+        text.textContent = (t.done ? '✅ ' : t.closed ? '⛔ ' : t.pinned ? '📌 ' : '') + t.text;
         card.appendChild(text);
 
         const meta = document.createElement('div');
         meta.className = 'taskMeta';
         if (t.dueAt) {
           const due = document.createElement('span');
-          due.className = 'due' + (t.dueAt <= Date.now() ? ' overdue' : '');
+          due.className = 'due' + (t.dueAt <= Date.now() && !t.done ? ' overdue' : '');
           due.textContent = '🕒 ' + fmtDue(t.dueAt);
           meta.appendChild(due);
         }
-        if (t.assigneeName) {
-          const who = document.createElement('span');
-          who.textContent = '👉 ' + t.assigneeName;
-          meta.appendChild(who);
-        } else {
-          const who = document.createElement('span');
-          who.textContent = '👉 未指派';
-          meta.appendChild(who);
+        const assigneeNames = (Array.isArray(t.assigneeNames) && t.assigneeNames.length) ? t.assigneeNames : (t.assigneeName ? [t.assigneeName] : []);
+        const who = document.createElement('span');
+        who.textContent = '👉 ' + (assigneeNames.length ? assigneeNames.join('、') : '未指派');
+        meta.appendChild(who);
+        if (t.progress && t.progress.total) {
+          const pd = document.createElement('span');
+          pd.textContent = '✅ ' + t.progress.done + '/' + t.progress.total + ' 人已完成';
+          if (t.progress.done >= t.progress.total) pd.className = 'myDone';
+          meta.appendChild(pd);
         }
-        if (t.creatorName) {
-          const by = document.createElement('span');
-          by.textContent = '发布：' + t.creatorName;
-          meta.appendChild(by);
+        if (t.myDone) {
+          const mine = document.createElement('span');
+          mine.className = 'myDone';
+          mine.textContent = '· 我已勾选';
+          meta.appendChild(mine);
         }
         if (meta.childNodes.length) card.appendChild(meta);
-
-        if (t.fields && t.fields.length) {
-          const fields = document.createElement('div');
-          fields.className = 'fields';
-          t.fields.forEach((f) => {
-            const line = document.createElement('div');
-            line.className = 'fieldLine';
-            const b = document.createElement('b');
-            b.textContent = f.label + '：';
-            line.appendChild(b);
-            line.appendChild(document.createTextNode(f.value || ''));
-            fields.appendChild(line);
-          });
-          card.appendChild(fields);
-        }
+        card.onclick = () => openDetail(t.id);
         list.appendChild(card);
       });
     }
@@ -369,13 +569,191 @@
       clearInterval(polling);
       polling = setInterval(() => {
         if (document.visibilityState === 'hidden') return;
-        loadState(false).catch((e) => {
-          if (e && e.auth) showLogin('这个设备的登录已失效，请重新生成设备链接');
-        });
+        loadState(false).catch((e) => { if (e && e.auth) showLogin('这个设备的登录已失效，请重新生成设备链接'); });
       }, 2500);
     }
 
-    async function publish() {
+    function findTask(id) {
+      return (stateData && stateData.tasks || []).find((t) => t.id === id) || null;
+    }
+
+    function openDetail(id) {
+      const t = findTask(id);
+      if (!t) { toast('任务已更新，请刷新'); return; }
+      detailId = id;
+      const box = $('detailBody');
+      let html = '<div class="detailText">' + esc(t.text) + '</div>';
+
+      html += '<div class="detailSec"><h4>基本信息</h4>';
+      html += '<div class="kv"><b>状态</b><span>' + (t.done ? '团队已标记完成' + (t.doneByName ? '（' + esc(t.doneByName) + '）' : '') : t.closed ? '已关闭' + (t.closedByName ? '（' + esc(t.closedByName) + '）' : '') : '待办') + '</span></div>';
+      html += '<div class="kv"><b>发布人</b><span>' + esc(t.creatorName || '—') + '</span></div>';
+      html += '<div class="kv"><b>发布时间</b><span>' + fmtTs(t.createdAt) + '</span></div>';
+      if (t.dueAt) html += '<div class="kv"><b>截止</b><span>' + fmtTs(t.dueAt) + (t.remindHours ? '（提前 ' + t.remindHours + ' 小时提醒）' : '') + '</span></div>';
+      html += '<div class="kv"><b>发布范围</b><span>' + esc(audLabel(t.audience)) + '</span></div>';
+      html += '<div class="kv"><b>指派给</b><span>' + esc((t.assigneeNames && t.assigneeNames.length) ? t.assigneeNames.join('、') : '未指派') + '</span></div>';
+      html += '</div>';
+
+      if (t.fields && t.fields.length) {
+        html += '<div class="detailSec"><h4>附加字段</h4>';
+        t.fields.forEach((f) => { if (f.label || f.value) html += '<div class="kv"><b>' + esc(f.label || '字段') + '</b><span>' + esc(f.value || '') + '</span></div>'; });
+        html += '</div>';
+      }
+
+      if (t.progress && t.progress.total) {
+        const pct = Math.round(t.progress.done / t.progress.total * 100);
+        html += '<div class="detailSec"><h4>成员完成进度</h4><div class="progressBox">';
+        html += '<div class="kv"><b>已完成</b><span>' + t.progress.done + ' / ' + t.progress.total + ' 人</span></div>';
+        html += '<div class="progressTrack"><div class="progressFill' + (pct >= 100 ? ' full' : '') + '" style="width:' + pct + '%"></div></div>';
+        if (t.progress.names && t.progress.names.length) html += '<div class="progressNames">已勾选：' + esc(t.progress.names.join('、')) + '</div>';
+        html += '</div></div>';
+      }
+
+      if (t.linkType && t.linkTarget) {
+        html += '<div class="detailSec"><h4>任务链接</h4>';
+        if (t.linkType === 'url') html += '<a class="linkBtn" href="' + esc(t.linkTarget) + '" target="_blank" rel="noopener">🌐 在浏览器打开</a>';
+        else html += '<div class="kv"><b>本地路径</b><span>' + esc(t.linkTarget) + '</span></div>';
+        html += '</div>';
+      }
+
+      const files = [];
+      if (t.file) files.push({ name: t.file.displayName, size: t.file.size, href: fileUrl(t.id, ''), sub: '主文件 · v' + t.file.version });
+      (t.memberFiles || []).forEach((mf) => files.push({ name: mf.displayName, size: mf.size, href: fileUrl(t.id, mf.memberId), sub: (mf.memberName || '成员') + ' 提交 · v' + mf.version }));
+      if (files.length) {
+        html += '<div class="detailSec"><h4>任务文件</h4>';
+        files.forEach((f) => { html += '<a class="fileBtn" href="' + f.href + '"><span>📄 ' + esc(f.name) + '<br><small>' + esc(f.sub) + '</small></span><small>' + fmtSize(f.size) + ' ↓</small></a>'; });
+        html += '</div>';
+      }
+
+      if (!t.done && !t.closed) {
+        html += '<button class="doneToggle' + (t.myDone ? ' undo' : '') + '" id="dDone">' + (t.myDone ? '✓ 我已勾选完成 · 点此取消' : '○ 标记「我已完成」') + '</button>';
+      }
+      box.innerHTML = html;
+      $('detailOverlay').hidden = false;
+      const btn = $('dDone');
+      if (btn) btn.onclick = () => toggleMyDone(t.id);
+    }
+
+    async function toggleMyDone(id) {
+      if (busy) return;
+      busy = true;
+      try {
+        await api('/api/action', { method: 'POST', body: { type: 'togglePersonalDone', id } });
+        await loadState(true);
+        openDetail(id);
+      } catch (e) { toast(e.message || '操作失败'); }
+      finally { busy = false; }
+    }
+
+    function closeDetail() { $('detailOverlay').hidden = true; detailId = ''; }
+
+    function addFieldRow(label, value) {
+      const row = document.createElement('div');
+      row.className = 'fieldRow';
+      const l = document.createElement('input'); l.className = 'formInput'; l.placeholder = '字段'; l.value = label || '';
+      const v = document.createElement('input'); v.className = 'formInput'; v.placeholder = '内容'; v.value = value || '';
+      row.appendChild(l); row.appendChild(v);
+      $('fFields').appendChild(row);
+    }
+
+    function buildCheckList(container, items, checkedIds) {
+      container.innerHTML = '';
+      (items || []).forEach((m) => {
+        const label = document.createElement('label');
+        label.className = 'checkItem';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.value = m.id;
+        if (checkedIds && checkedIds.includes(m.id)) cb.checked = true;
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode((m.avatar || '👤') + ' ' + m.name + (m.role === 'owner' ? '（创建者）' : m.role === 'admin' ? '（管理员）' : '')));
+        container.appendChild(label);
+      });
+    }
+
+    let audMode = 'all';
+    function openPublish() {
+      const text = $('newTask').value.trim();
+      $('fText').value = text;
+      $('fDue').value = ''; $('fRemind').value = '0';
+      $('fLinkType').value = ''; $('fLinkTarget').value = '';
+      $('fFile').value = '';
+      $('fFields').innerHTML = '';
+      addFieldRow('', '');
+      const members = (stateData && stateData.members) || [];
+      const me = stateData && stateData.me;
+      const others = members.filter((m) => !me || m.id !== me.id);
+      buildCheckList($('fAssignees'), members, []);
+      buildCheckList($('fAudMembers'), others, []);
+      const rolesSet = new Set();
+      others.forEach((m) => { const tag = String(m.roleTag || '').replace(/^#+/, '').trim(); if (tag) rolesSet.add(tag); });
+      buildCheckList($('fAudRoles'), Array.from(rolesSet).map((tag) => ({ id: tag, name: tag, avatar: '🏷' })), []);
+      setAudMode('all');
+      $('publishOverlay').hidden = false;
+      setTimeout(() => { try { $('fText').focus(); } catch (e) { /* ignore */ } }, 120);
+    }
+    function closePublish() { $('publishOverlay').hidden = true; }
+    function setAudMode(mode) {
+      audMode = mode;
+      $('fAudSeg').querySelectorAll('.segBtn').forEach((b) => b.classList.toggle('on', b.dataset.aud === mode));
+      $('fAudMembersBox').hidden = mode !== 'members';
+      $('fAudRolesBox').hidden = mode !== 'roles';
+    }
+    function checkedValues(container) {
+      return Array.from(container.querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.value);
+    }
+
+    async function publishFull() {
+      if (busy) return;
+      const text = $('fText').value.trim();
+      if (!text) { toast('先写任务内容'); return; }
+      const dueAt = $('fDue').value ? new Date($('fDue').value).getTime() : 0;
+      if (dueAt && dueAt <= Date.now()) { toast('截止时间要在未来'); return; }
+      const remindHours = Number($('fRemind').value) || 0;
+      const assigneeIds = checkedValues($('fAssignees'));
+      let audience = { type: 'all', roles: [], memberIds: [] };
+      if (audMode === 'members') {
+        const ids = checkedValues($('fAudMembers'));
+        if (!ids.length) { toast('至少勾选一个可见成员'); return; }
+        audience = { type: 'members', memberIds: ids };
+      } else if (audMode === 'roles') {
+        const roles = checkedValues($('fAudRoles'));
+        if (!roles.length) { toast('至少勾选一个角色'); return; }
+        audience = { type: 'roles', roles };
+      }
+      const linkType = $('fLinkType').value;
+      const linkTarget = $('fLinkTarget').value.trim();
+      if (linkType === 'url' && !linkTarget) { toast('填了网页链接类型就要填网址'); return; }
+      const fields = Array.from($('fFields').querySelectorAll('.fieldRow')).map((row) => {
+        const inputs = row.querySelectorAll('input');
+        return { label: (inputs[0].value || '').trim(), value: (inputs[1].value || '').trim() };
+      }).filter((f) => f.label || f.value);
+      const file = $('fFile').files && $('fFile').files[0];
+      if (file && file.size > 200 * 1024 * 1024) { toast('文件不能超过 200 MB'); return; }
+
+      busy = true;
+      $('fSubmit').disabled = true;
+      $('fSubmit').textContent = '发布中…';
+      try {
+        const r = await api('/api/action', { method: 'POST', body: {
+          type: 'addTask', text, dueAt, remindHours, audience, assigneeIds,
+          linkType, linkTarget, fields
+        } });
+        const id = r.createdId;
+        if (file && id) await uploadFile(id, file);
+        $('newTask').value = '';
+        $('newTask').style.height = '';
+        closePublish();
+        await loadState(true);
+        toast(file ? '已发布任务并上传文件' : '任务已发布');
+      } catch (e) {
+        toast(e.message || '发布失败');
+      } finally {
+        busy = false;
+        $('fSubmit').disabled = false;
+        $('fSubmit').textContent = '发布任务';
+      }
+    }
+
+    async function publishQuick() {
       const box = $('newTask');
       const text = box.value.trim();
       if (!text) { toast('先写点任务内容'); return; }
@@ -385,8 +763,7 @@
       $('postState').textContent = '发布中…';
       try {
         await api('/api/action', { method: 'POST', body: { type: 'addTask', text, audience: { type: 'all' } } });
-        box.value = '';
-        box.style.height = '';
+        box.value = ''; box.style.height = '';
         await loadState(true);
         toast('已发布到团队');
       } catch (e) {
@@ -399,17 +776,23 @@
     }
 
     $('loginBtn').addEventListener('click', () => login($('codeInput').value));
-    $('codeInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); login($('codeInput').value); }
-    });
-    $('refreshBtn').addEventListener('click', () => {
-      loadState(true).then(() => toast('已刷新')).catch((e) => toast(e.message || '刷新失败'));
-    });
-    $('sendBtn').addEventListener('click', publish);
+    $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); login($('codeInput').value); } });
+    $('refreshBtn').addEventListener('click', () => { loadState(true).then(() => toast('已刷新')).catch((e) => toast(e.message || '刷新失败')); });
+    $('sendBtn').addEventListener('click', publishQuick);
+    $('moreBtn').addEventListener('click', openPublish);
     $('newTask').addEventListener('input', () => {
       const box = $('newTask');
       box.style.height = 'auto';
       box.style.height = Math.min(box.scrollHeight, Math.round(window.innerHeight * 0.3)) + 'px';
+    });
+    $('detailClose').addEventListener('click', closeDetail);
+    $('detailOverlay').addEventListener('click', (e) => { if (e.target === $('detailOverlay')) closeDetail(); });
+    $('publishClose').addEventListener('click', closePublish);
+    $('publishOverlay').addEventListener('click', (e) => { if (e.target === $('publishOverlay')) closePublish(); });
+    $('fAddField').addEventListener('click', () => addFieldRow('', ''));
+    $('fSubmit').addEventListener('click', publishFull);
+    $('fAudSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('.segBtn'); if (b) setAudMode(b.dataset.aud);
     });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && token) loadState(false).catch(() => {});

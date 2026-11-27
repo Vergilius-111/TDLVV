@@ -24,6 +24,43 @@ function fileParts(name) {
   return { base: safeName(base, 80), ext };
 }
 
+/** 任务文件夹的相对路径：<团队>/<任务标题>；只做纯字符串计算，方便放进同步 state */
+function taskFolderRel(boardId, taskName, taskId) {
+  const board = safePart(boardId, 40);
+  const title = safeName(taskName || '未命名任务', 50);
+  return `${board}/${title}`;
+}
+
+/** 真正建目录。同名文件夹已属于别的任务时追加短 id，避免互相覆盖 */
+function ensureTaskFolder(root, rel, taskId) {
+  const baseRoot = path.resolve(root);
+  const wanted = String(rel || taskFolderRel('', '未命名任务', taskId)).replace(/\\/g, '/');
+  let finalRel = wanted;
+  for (let i = 0; i < 20; i++) {
+    const abs = path.resolve(baseRoot, finalRel);
+    if (abs !== baseRoot && !abs.startsWith(baseRoot + path.sep)) break;
+    const marker = path.join(abs, '.tdlvv-task.json');
+    let owner = '';
+    try {
+      if (fs.existsSync(marker)) owner = String(JSON.parse(fs.readFileSync(marker, 'utf8')).taskId || '');
+    } catch (e) { owner = ''; }
+    if (!owner || owner === String(taskId)) break;
+    finalRel = `${wanted}-${safePart(taskId, 4)}${i ? `-${i + 1}` : ''}`;
+  }
+  const abs = path.resolve(baseRoot, finalRel);
+  if (abs === baseRoot || !abs.startsWith(baseRoot + path.sep)) return '';
+  try {
+    fs.mkdirSync(abs, { recursive: true });
+    const marker = path.join(abs, '.tdlvv-task.json');
+    if (!fs.existsSync(marker)) {
+      fs.writeFileSync(marker, JSON.stringify({ taskId: String(taskId || ''), createdAt: Date.now() }));
+    }
+  } catch (e) {
+    return '';
+  }
+  return finalRel.replace(/\\/g, '/');
+}
+
 function createStore(root) {
   const baseRoot = path.resolve(root);
   fs.mkdirSync(baseRoot, { recursive: true });
@@ -143,4 +180,4 @@ function baseRoot(o) {
   return path.resolve(o.userData || process.cwd());
 }
 
-module.exports = { createStore, pickRoot, safeName, fileParts };
+module.exports = { createStore, pickRoot, safeName, fileParts, taskFolderRel, ensureTaskFolder };
